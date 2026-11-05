@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Full test run on a fresh local mainnet fork (real ENSv2 state):
 #   contracts (unit + fork tests) → typecheck → fork with Navik deployed → CLI flow →
-#   dashboard in headless Chromium → dashboard published to navik.eth → dashboard e2e against
-#   the exact bytes navik.eth serves → freeze navik.eth (in a snapshot, reverted afterwards).
+#   dashboard in headless Chromium → dashboard published to navik.eth → rebuilt from source and
+#   compared byte for byte → dashboard e2e against the exact bytes navik.eth serves → freeze
+#   navik.eth (in a snapshot, reverted afterwards).
 # Leaves the fork running on :8545 for manual testing; stop it with `kill $(cat .anvil.pid)`.
 # Needs: Foundry, Node >= 22.18, pnpm, and `pnpm install` + `pnpm -C app exec playwright install chromium`.
 set -euo pipefail
@@ -44,6 +45,10 @@ step "dashboard: gzip loader and full UI flow in headless Chromium"
 
 step "publish the dashboard to app.navik.eth (compressed) so navik.eth serves it"
 PRIVATE_KEY=$OWNER_KEY ./scripts/deploy-app.sh
+
+step "rebuild the dashboard from source: byte-identical to what navik.eth serves"
+(cd app && NAVIK_CHAINS=31337 pnpm -s exec vite build --logLevel warn --outDir "$WORK/rebuild")
+node cli/src/cli.ts verify navik.eth --against "$WORK/rebuild/index.html"
 
 step "dashboard e2e against the exact bytes navik.eth serves"
 node cli/src/cli.ts verify navik.eth --raw --out "$WORK/navik.html"
