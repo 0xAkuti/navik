@@ -62,13 +62,18 @@ program
   .argument('<project>')
   .argument('<file>', 'single-file HTML document')
   .option('--promote', 'also make it production')
+  .option('--compress', 'store gzip-wrapped with a small loader (cheaper; the site then needs JavaScript)')
   .option('--dry-run', 'print the plan only')
-  .action(async (project: string, file: string, opts: { promote?: boolean; dryRun?: boolean }) => {
+  .action(async (project: string, file: string, opts: { promote?: boolean; compress?: boolean; dryRun?: boolean }) => {
     const c = await ctx()
-    const plan = await navik.planPublish(c, project, new Uint8Array(readFileSync(file)))
+    const plan = await navik.planPublish(c, project, new Uint8Array(readFileSync(file)), { compress: opts.compress })
     const reused = plan.chunks.filter((ch) => ch.stored).length
     const txs = plan.singleTx ? 1 : plan.uploads.length + 1
     console.log(`release      ${plan.name}`)
+    if (plan.compressed) {
+      const { originalSize, originalChunks } = plan.compressed
+      console.log(`compressed   ${originalSize} → ${plan.size} bytes (${originalChunks} → ${plan.chunks.length} chunks)`)
+    }
     console.log(`size         ${plan.size} / ${plan.maxSize} bytes`)
     console.log(`chunks       ${plan.chunks.length} (${reused} already stored, ${plan.chunks.length - reused} new)`)
     console.log(`content hash ${plan.contentHash}`)
@@ -175,8 +180,9 @@ program
   .command('verify')
   .description('resolve a name, check it is a genuine release and that html() matches its content hash')
   .argument('<name>', 'portfolio, portfolio-v2, portfolio.navik.eth or any ENS name')
-  .option('--out <file>', 'write the verified HTML to a file')
-  .action(async (name: string, opts: { out?: string }) => {
+  .option('--out <file>', 'write the verified HTML to a file (the original document if gzip-wrapped)')
+  .option('--raw', 'with --out: write the exact stored bytes, even if gzip-wrapped')
+  .action(async (name: string, opts: { out?: string; raw?: boolean }) => {
     const c = await ctx()
     const v = await navik.verify(c, name)
     const ok = v.isNavikDeployment && v.hashMatches && v.belongsToProject !== false
@@ -185,9 +191,11 @@ program
     if (v.belongsToProject !== undefined) console.log(`  ${tick(v.belongsToProject)} belongs to ${v.project ?? 'this project'}`)
     if (v.releaseName) console.log(`  ✓ release ${v.releaseName}`)
     console.log(`  ${tick(v.hashMatches)} html() matches content hash ${v.contentHash}`)
+    if (v.original) console.log(`  ✓ gzip-wrapped: original ${v.original.html.length} bytes, keccak256 ${v.original.hash}`)
     if (opts.out) {
-      writeFileSync(opts.out, v.html)
-      console.log(`  wrote ${v.html.length} bytes to ${opts.out}`)
+      const bytes = v.original && !opts.raw ? v.original.html : v.html
+      writeFileSync(opts.out, bytes)
+      console.log(`  wrote ${bytes.length} bytes to ${opts.out}`)
     }
     if (!ok) process.exitCode = 1
   })
@@ -203,7 +211,7 @@ program
     const dir = join(tmpdir(), 'navik')
     mkdirSync(dir, { recursive: true })
     const file = join(dir, `${v.name}.html`)
-    writeFileSync(file, v.html)
+    writeFileSync(file, v.original?.html ?? v.html)
     console.log(pathToFileURL(file).href)
   })
 
