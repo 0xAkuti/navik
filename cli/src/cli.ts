@@ -189,7 +189,8 @@ program
   .argument('<name>', 'portfolio, 2.portfolio, preview.portfolio, portfolio.navik.eth or any ENS name')
   .option('--out <file>', 'write the verified HTML to a file (the original document if gzip-wrapped)')
   .option('--raw', 'with --out: write the exact stored bytes, even if gzip-wrapped')
-  .action(async (name: string, opts: { out?: string; raw?: boolean }) => {
+  .option('--against <file>', 'check a local build (e.g. from the source repo) is byte-identical to the release')
+  .action(async (name: string, opts: { out?: string; raw?: boolean; against?: string }) => {
     const c = await ctx()
     const v = await navik.verify(c, name)
     const ok = v.isNavikDeployment && v.hashMatches && v.belongsToProject !== false
@@ -199,6 +200,15 @@ program
     if (v.releaseName) console.log(`  ✓ release ${v.releaseName}`)
     console.log(`  ${tick(v.hashMatches)} html() matches content hash ${v.contentHash}`)
     if (v.original) console.log(`  ✓ gzip-wrapped: original ${v.original.html.length} bytes, keccak256 ${v.original.hash}`)
+    if (opts.against) {
+      const local = navik.compareBuild(v, readFileSync(opts.against))
+      console.log(
+        local.matches
+          ? `  ✓ ${opts.against} is byte-identical to the ${local.matched === 'original' ? 'original document' : 'release'}`
+          : `  ✗ ${opts.against} (keccak256 ${local.hash}) differs from the release`,
+      )
+      if (!local.matches) process.exitCode = 1
+    }
     if (opts.out) {
       const bytes = v.original && !opts.raw ? v.original.html : v.html
       writeFileSync(opts.out, bytes)
