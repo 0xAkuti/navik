@@ -1,0 +1,214 @@
+#!/usr/bin/env node
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { Command, Option } from 'commander'
+import { type Address, BaseError, ContractFunctionRevertedError, getAddress, isAddress } from 'viem'
+
+import { type GlobalOptions, loadCtx } from './config.ts'
+import { parseVersion } from './names.ts'
+import * as navik from './navik.ts'
+
+const program = new Command()
+  .name('navik')
+  .description('Deploy fully onchain websites to <project>.navik.eth (ENSv2 + ERC-8244)')
+  .option('--rpc <url>', 'JSON-RPC endpoint (env RPC_URL, default http://127.0.0.1:8545)')
+  .option('--deployment <file>', 'Navik deployment JSON (env NAVIK_DEPLOYMENT, default contracts/deployments/<chainId>.json)')
+
+const ctx = () => loadCtx(program.opts<GlobalOptions>())
+const permission = () =>
+  new Option('--permission <kind>', 'publish: ship releases · promote: change production')
+    .choices(['publish', 'promote'])
+    .default('publish')
+
+program
+  .command('info')
+  .description('show the Navik contracts in use')
+  .action(async () => {
+    const c = await ctx()
+    const d = c.deployment
+    console.log(`root        ${d.root}${d.rootLocked ? ' (locked: nobody can repoint it)' : ' (NOT locked)'}`)
+    console.log(`chain       ${d.chainId}`)
+    console.log(`registrar   ${d.registrar}`)
+    console.log(`registry    ${d.registry}`)
+    console.log(`factory     ${d.factory}`)
+    console.log(`resolver    ${d.resolver}`)
+    if (c.account) console.log(`account     ${c.account.address}`)
+  })
+
+program
+  .command('claim')
+  .description('claim <project>.navik.eth; you become the only role holder of its resolver')
+  .argument('<project>')
+  .option('--owner <address>', 'owner of the new name (default: your account)')
+  .action(async (project: string, opts: { owner?: string }) => {
+    const c = await ctx()
+    const { name, resolver, hash } = await navik.claim(c, project, opts.owner ? addr(opts.owner) : undefined)
+    console.log(`claimed ${name}`)
+    console.log(`  resolver ${resolver}`)
+    console.log(`  tx       ${hash}`)
+  })
+
+program
+  .command('deploy')
+  .description('publish a prebuilt HTML file as a new permanent release')
+  .argument('<project>')
+  .argument('<file>', 'single-file HTML document')
+  .option('--promote', 'also make it production')
+  .option('--dry-run', 'print the plan only')
+  .action(async (project: string, file: string, opts: { promote?: boolean; dryRun?: boolean }) => {
+    const c = await ctx()
+    const plan = await navik.planPublish(c, project, new Uint8Array(readFileSync(file)))
+    console.log(`release      ${plan.name}`)
+    console.log(`size         ${plan.size} / ${plan.maxSize} bytes`)
+    console.log(`content hash ${plan.contentHash}`)
+    console.log(`address      ${plan.predicted} (known before upload)`)
+    if (opts.dryRun) return
+
+    const { hash, gasUsed } = await navik.publish(c, plan)
+    console.log(`published    tx ${hash} (gas ${gasUsed})`)
+    if (opts.promote) {
+      const tx = await navik.promote(c, project, plan.predicted)
+      console.log(`promoted     ${navik.projectName(c, project)} → ${plan.name} (tx ${tx})`)
+    }
+  })
+
+program
+  .command('promote')
+  .alias('rollback')
+  .description('point production <project>.navik.eth at an existing release')
+  .argument('<project>')
+  .argument('<version>', 'v1, v2, …')
+  .action(async (project: string, version: string) => {
+    const c = await ctx()
+    const v = parseVersion(version)
+    const deployment = await navik.deploymentOf(c, project, v)
+    const tx = await navik.promote(c, project, deployment)
+    console.log(`${navik.projectName(c, project)} → ${navik.releaseName(c, project, v)} (${deployment})`)
+    console.log(`  tx ${tx}`)
+  })
+
+program
+  .command('demote')
+  .description('clear production; releases keep their names')
+  .argument('<project>')
+  .action(async (project: string) => {
+    const c = await ctx()
+    const tx = await navik.demote(c, project)
+    console.log(`${navik.projectName(c, project)} → (none)`)
+    console.log(`  tx ${tx}`)
+  })
+
+program
+  .command('grant')
+  .description('let another key publish releases or change production for this project only')
+  .argument('<project>')
+  .argument('<account>')
+  .addOption(permission())
+  .action(async (project: string, account: string, opts: { permission: navik.Permission }) => {
+    const c = await ctx()
+    const tx = await navik.grant(c, project, addr(account), opts.permission)
+    console.log(`granted ${opts.permission} on ${navik.projectName(c, project)} to ${addr(account)}`)
+    console.log(`  tx ${tx}`)
+  })
+
+program
+  .command('revoke')
+  .description('remove a key permission granted with `grant`')
+  .argument('<project>')
+  .argument('<account>')
+  .addOption(permission())
+  .action(async (project: string, account: string, opts: { permission: navik.Permission }) => {
+    const c = await ctx()
+    const tx = await navik.revoke(c, project, addr(account), opts.permission)
+    console.log(`revoked ${opts.permission} on ${navik.projectName(c, project)} from ${addr(account)}`)
+    console.log(`  tx ${tx}`)
+  })
+
+program
+  .command('ls')
+  .description('list releases and which one is live')
+  .argument('<project>')
+  .action(async (project: string) => {
+    const c = await ctx()
+    const owner = await navik.projectOwner(c, project)
+    const { releases, live } = await navik.listReleases(c, project)
+    console.log(`${navik.projectName(c, project)}  owner ${owner}`)
+    if (releases.length === 0) console.log('  no releases yet')
+    for (const r of releases) {
+      const mark = live && getAddress(live) === getAddress(r.deployment) ? '● live' : '      '
+      console.log(`  ${mark}  ${r.name.padEnd(36)} ${r.deployment}  ${r.size} B  ${r.contentHash.slice(0, 10)}…`)
+    }
+    if (live && !releases.some((r) => getAddress(r.deployment) === getAddress(live))) {
+      console.log(`  ● live  ${live} (not a release of this project)`)
+    }
+  })
+
+program
+  .command('resolve')
+  .description('resolve the contentcontract of any ENS name through ENSv2')
+  .argument('<name>')
+  .action(async (name: string) => {
+    const c = await ctx()
+    const fqdn = name.includes('.') ? name : `${name}.${c.deployment.root}`
+    const d = await navik.resolveContentContract(c, fqdn)
+    console.log(d ? `${fqdn} → ${d}` : `${fqdn} → (none)`)
+  })
+
+program
+  .command('verify')
+  .description('resolve a name, check it is a genuine release and that html() matches its content hash')
+  .argument('<name>', 'portfolio, portfolio-v2, portfolio.navik.eth or any ENS name')
+  .option('--out <file>', 'write the verified HTML to a file')
+  .action(async (name: string, opts: { out?: string }) => {
+    const c = await ctx()
+    const v = await navik.verify(c, name)
+    const ok = v.isNavikDeployment && v.hashMatches && v.belongsToProject !== false
+    console.log(`${v.name} → ${v.deployment}`)
+    console.log(`  ${tick(v.isNavikDeployment)} created by the Navik factory`)
+    if (v.belongsToProject !== undefined) console.log(`  ${tick(v.belongsToProject)} belongs to ${v.project ?? 'this project'}`)
+    if (v.releaseName) console.log(`  ✓ release ${v.releaseName}`)
+    console.log(`  ${tick(v.hashMatches)} html() matches content hash ${v.contentHash}`)
+    if (opts.out) {
+      writeFileSync(opts.out, v.html)
+      console.log(`  wrote ${v.html.length} bytes to ${opts.out}`)
+    }
+    if (!ok) process.exitCode = 1
+  })
+
+program
+  .command('open')
+  .description('fetch and verify a site from Ethereum, write it locally (no servers involved)')
+  .argument('<name>')
+  .action(async (name: string) => {
+    const c = await ctx()
+    const v = await navik.verify(c, name)
+    if (!(v.isNavikDeployment && v.hashMatches)) throw new Error(`${v.name} failed verification; run \`navik verify\``)
+    const dir = join(tmpdir(), 'navik')
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, `${v.name}.html`)
+    writeFileSync(file, v.html)
+    console.log(pathToFileURL(file).href)
+  })
+
+function addr(value: string): Address {
+  if (!isAddress(value)) throw new Error(`not an address: ${value}`)
+  return getAddress(value)
+}
+
+function tick(ok: boolean) {
+  return ok ? '✓' : '✗'
+}
+
+function describe(err: unknown): string {
+  if (!(err instanceof BaseError)) return err instanceof Error ? err.message : String(err)
+  const revert = err.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null
+  if (revert?.data) return `${err.shortMessage} ${revert.data.errorName}(${(revert.data.args ?? []).join(', ')})`
+  return err.shortMessage
+}
+
+program.parseAsync().catch((err: unknown) => {
+  console.error(`error: ${describe(err)}`)
+  process.exit(1)
+})
