@@ -10,6 +10,7 @@ type Data = {
   owner: Address
   releases: navik.Release[]
   live?: Address
+  preview?: Address
   perms: { owner: boolean; publish: boolean; promote: boolean }
   keys?: navik.KeyGrant[]
 }
@@ -24,12 +25,12 @@ export function ProjectView(props: { ctx: navik.Ctx; project: string; account: A
     try {
       const owner = await navik.projectOwner(ctx, project)
       if (BigInt(owner) === 0n) throw new Error(`${navik.projectName(ctx, project)} is not claimed`)
-      const [{ releases, live }, perms] = await Promise.all([
+      const [{ releases, live, preview }, perms] = await Promise.all([
         navik.listReleases(ctx, project),
         navik.permissionsOf(ctx, project, account),
       ])
       const keys = perms.owner ? await navik.listKeys(ctx, project).catch(() => undefined) : undefined
-      setData({ owner, releases, live, perms, keys })
+      setData({ owner, releases, live, preview, perms, keys })
     } catch (err) {
       setError(navik.describeError(err))
     }
@@ -50,6 +51,8 @@ export function ProjectView(props: { ctx: navik.Ctx; project: string; account: A
   if (!data) return <p class="muted">Loading {navik.projectName(ctx, project)}…</p>
 
   const liveRelease = data.live && data.releases.find((r) => getAddress(r.deployment) === getAddress(data.live!))
+  const previewRelease =
+    data.preview && data.releases.find((r) => getAddress(r.deployment) === getAddress(data.preview!))
   const role = data.perms.owner ? 'owner' : data.perms.promote ? 'deploy + promote key' : data.perms.publish ? 'deploy key' : 'read only'
 
   return (
@@ -82,6 +85,12 @@ export function ProjectView(props: { ctx: navik.Ctx; project: string; account: A
           </p>
         ) : (
           <p class="muted">Nothing is live. Deploy a release and promote it.</p>
+        )}
+        {previewRelease && (
+          <p class="live small muted">
+            <Badge>preview</Badge> <Mono>{navik.previewName(ctx, project)}</Mono> → <Mono>{previewRelease.name}</Mono>{' '}
+            (newest release)
+          </p>
         )}
       </Card>
 

@@ -127,7 +127,7 @@ function Welcome(props: { wallets: WalletInfo[]; connect: (w: WalletInfo) => voi
       <h1>Websites that live on Ethereum, named by ENS.</h1>
       <p>
         Deploy a single-file site as an immutable contract, get a permanent name for every release (
-        <Mono>site-v3.navik.eth</Mono>), and choose what <Mono>site.navik.eth</Mono> serves. No servers.
+        <Mono>3.site.navik.eth</Mono>), and choose what <Mono>site.navik.eth</Mono> serves. No servers.
       </p>
       {props.wallets.length === 0 ? (
         <p class="muted">No browser wallet found. Install one to manage projects.</p>
@@ -190,7 +190,8 @@ function Intro(props: { ctx: navik.Ctx }) {
         </li>
         <li>
           Deploy a single-file HTML build. Every release is an immutable contract with its own name,{' '}
-          <Mono>{`<project>-v<N>.${root}`}</Mono>.
+          <Mono>{`<N>.<project>.${root}`}</Mono>, and <Mono>{`preview.<project>.${root}`}</Mono> follows
+          the newest one.
         </li>
         <li>Promote a release to production, roll back with one click, or grant deploy keys to CI.</li>
       </ol>

@@ -93,6 +93,7 @@ button img { width: 18px; height: 18px; }
 .small { font-size: 0.85rem; }
 .error { color: var(--error); }
 .live { margin: 0; }
+.live + .live { margin-top: 0.5rem; }
 
 .drop { display: block; border: 2px dashed var(--line); border-radius: 8px; padding: 1.25rem; text-align: center; cursor: pointer; color: var(--muted); }
 .drop:hover, .drop.drag { border-color: var(--accent); color: var(--text); }
