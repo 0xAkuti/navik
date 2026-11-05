@@ -19,28 +19,38 @@ export const registryAbi = parseAbi([
 export const ROOT_CONTROL_ROLES = (1n << 20n) | ((1n << 20n) << 128n) | (1n << 24n) | ((1n << 24n) << 128n)
 
 export const factoryAbi = parseAbi([
-  'function publish(string label, bytes html) returns (address deployment, uint64 version)',
+  'function storeChunks(bytes[] chunks) returns (address[] pointers)',
+  'function chunkPointer(bytes chunk) view returns (address)',
+  'function publish(string label, address[] pointers) returns (address deployment, uint64 version)',
+  'function publishContent(string label, bytes[] chunks) returns (address deployment, uint64 version)',
   'function canPublish(string label, address account) view returns (bool)',
   'function projectNode(string label) view returns (bytes32)',
   'function versionCount(bytes32 node) view returns (uint64)',
   'function predict(bytes32 node, uint64 version) view returns (address)',
   'function deploymentOf(bytes32 node, uint64 version) view returns (address)',
   'function isNavikDeployment(address deployment) view returns (bool)',
-  'function MAX_SIZE() view returns (uint256)',
-  'event DeploymentPublished(bytes32 indexed projectNode, uint64 indexed version, address indexed deployment, string label, bytes32 contentHash, address pointer, address publisher)',
+  'function CHUNK_SIZE() view returns (uint256)',
+  'function MAX_CHUNKS() view returns (uint256)',
+  'event DeploymentPublished(bytes32 indexed projectNode, uint64 indexed version, address indexed deployment, string label, bytes32 contentHash, uint32 size, uint16 chunkCount, address publisher)',
   'error ProjectNotClaimed(string label)',
   'error NotPublisher(string label, address account)',
   'error InvalidContent()',
+  'error InvalidChunk(uint256 index)',
+  'error MissingChunk(address pointer)',
 ])
 
 export const deploymentAbi = parseAbi([
   'function html() view returns (string)',
-  'function manifest() view returns (bytes32 projectNode, uint64 version, bytes32 contentHash, address pointer, uint32 size)',
+  'function manifest() view returns (bytes32 projectNode, uint64 version, bytes32 contentHash, uint32 size, address[] pointers)',
+  'function chunkCount() view returns (uint256)',
   'function factory() view returns (address)',
 ])
 
 /** Same selector as html(): string and bytes share an ABI encoding, so this returns the exact stored bytes. */
-export const deploymentRawAbi = parseAbi(['function html() view returns (bytes)'])
+export const deploymentRawAbi = parseAbi([
+  'function html() view returns (bytes)',
+  'function chunk(uint256 i) view returns (bytes)',
+])
 
 export const resolverAbi = parseAbi([
   'function setText(bytes name, string key, string value)',

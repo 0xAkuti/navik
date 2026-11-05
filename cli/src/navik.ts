@@ -1,6 +1,7 @@
 import {
   type Abi,
   type Address,
+  concatBytes,
   encodeFunctionData,
   getAddress,
   type Hash,
@@ -105,12 +106,15 @@ export async function rootStatus(ctx: Ctx): Promise<RootStatus> {
   }
 }
 
+type Manifest = readonly [projectNode: Hex, version: bigint, contentHash: Hex, size: number, pointers: readonly Address[]]
+
 export type Release = {
   version: bigint
   name: string
   deployment: Address
   contentHash: Hex
   size: number
+  chunks: number
 }
 
 export async function listReleases(ctx: Ctx, project: string): Promise<{ releases: Release[]; live?: Address }> {
@@ -119,13 +123,15 @@ export async function listReleases(ctx: Ctx, project: string): Promise<{ release
   const releases: Release[] = []
   for (let v = 1n; v <= count; v++) {
     const deployment = await read<Address>(ctx, ctx.deployment.factory, factoryAbi, 'predict', [node, v])
-    const [, , contentHash, , size] = await read<readonly [Hex, bigint, Hex, Address, number]>(
-      ctx,
+    const [, , contentHash, size, pointers] = await read<Manifest>(ctx, deployment, deploymentAbi, 'manifest')
+    releases.push({
+      version: v,
+      name: releaseName(ctx, project, v),
       deployment,
-      deploymentAbi,
-      'manifest',
-    )
-    releases.push({ version: v, name: releaseName(ctx, project, v), deployment, contentHash, size })
+      contentHash,
+      size,
+      chunks: pointers.length,
+    })
   }
   const live = await resolveContentContract(ctx, projectName(ctx, project))
   return { releases, live }
@@ -165,8 +171,7 @@ export async function verifyDeployment(
   const isNavikDeployment = await read<boolean>(ctx, ctx.deployment.factory, factoryAbi, 'isNavikDeployment', [
     deployment,
   ])
-  const raw = await read<Hex>(ctx, deployment, deploymentRawAbi, 'html')
-  const html = hexToBytes(raw)
+  const html = await fetchHtml(ctx, deployment)
   const computedHash = keccak256(html)
   const result: Verification = {
     name,
@@ -179,12 +184,7 @@ export async function verifyDeployment(
   }
   if (!isNavikDeployment) return result
 
-  const [node, version, contentHash] = await read<readonly [Hex, bigint, Hex, Address, number]>(
-    ctx,
-    deployment,
-    deploymentAbi,
-    'manifest',
-  )
+  const [node, version, contentHash] = await read<Manifest>(ctx, deployment, deploymentAbi, 'manifest')
   result.version = version
   result.contentHash = contentHash
   result.hashMatches = contentHash === computedHash
@@ -198,6 +198,21 @@ export async function verifyDeployment(
   return result
 }
 
+/** Exact stored bytes of a release: `html()`, or chunk by chunk if the RPC rejects one big call. */
+export async function fetchHtml(ctx: Ctx, deployment: Address): Promise<Uint8Array> {
+  try {
+    return hexToBytes(await read<Hex>(ctx, deployment, deploymentRawAbi, 'html'))
+  } catch (err) {
+    const count = await read<bigint>(ctx, deployment, deploymentAbi, 'chunkCount').catch(() => undefined)
+    if (count === undefined) throw err
+    const parts: Uint8Array[] = []
+    for (let i = 0n; i < count; i++) {
+      parts.push(hexToBytes(await read<Hex>(ctx, deployment, deploymentRawAbi, 'chunk', [i])))
+    }
+    return concatBytes(parts)
+  }
+}
+
 // ----------------------------------------------------------------- writes
 
 export async function claim(ctx: Ctx, project: string, owner?: Address) {
@@ -208,11 +223,22 @@ export async function claim(ctx: Ctx, project: string, owner?: Address) {
   return { hash, resolver, name: projectName(ctx, project) }
 }
 
+/**
+ * Full chunks per transaction. Mainnet caps a transaction at 2^24 gas (EIP-7825) and one full
+ * chunk costs ~5.4M gas to store, so two fit with room for the publish itself (measured 11.8M).
+ */
+export const CHUNKS_PER_TX = 2
+
+export type PlannedChunk = { data: Uint8Array; pointer: Address; stored: boolean }
+
 export type PublishPlan = {
   project: string
-  bytes: Uint8Array
   size: number
   contentHash: Hex
+  chunks: PlannedChunk[]
+  /** Upload transactions for chunks not stored yet, then one publish (or one publishContent). */
+  uploads: Uint8Array[][]
+  singleTx: boolean
   version: bigint
   predicted: Address
   name: string
@@ -220,17 +246,37 @@ export type PublishPlan = {
 }
 
 export async function planPublish(ctx: Ctx, project: string, bytes: Uint8Array): Promise<PublishPlan> {
-  const maxSize = Number(await read<bigint>(ctx, ctx.deployment.factory, factoryAbi, 'MAX_SIZE'))
+  const f = ctx.deployment.factory
+  const [chunkSize, maxChunks] = (
+    await Promise.all([read<bigint>(ctx, f, factoryAbi, 'CHUNK_SIZE'), read<bigint>(ctx, f, factoryAbi, 'MAX_CHUNKS')])
+  ).map(Number)
+  const maxSize = chunkSize * maxChunks
   if (bytes.length === 0) throw new Error('empty site')
-  if (bytes.length > maxSize) throw new Error(`site is ${bytes.length} bytes; the MVP limit is ${maxSize} (one chunk)`)
+  if (bytes.length > maxSize) throw new Error(`site is ${bytes.length} bytes; the limit is ${maxSize}`)
+
+  const chunks: PlannedChunk[] = []
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const data = bytes.subarray(i, i + chunkSize)
+    const pointer = await read<Address>(ctx, f, factoryAbi, 'chunkPointer', [toHex(data)])
+    const code = await ctx.publicClient.getCode({ address: pointer })
+    chunks.push({ data, pointer, stored: code !== undefined && code !== '0x' })
+  }
+  const missing = chunks.filter((c) => !c.stored).map((c) => c.data)
+  const uploads: Uint8Array[][] = []
+  for (let i = 0; i < missing.length; i += CHUNKS_PER_TX) uploads.push(missing.slice(i, i + CHUNKS_PER_TX))
+  // all chunks new and few enough: store and publish together
+  const singleTx = missing.length === chunks.length && chunks.length <= CHUNKS_PER_TX
+
   const node = await projectNode(ctx, project)
-  const version = (await read<bigint>(ctx, ctx.deployment.factory, factoryAbi, 'versionCount', [node])) + 1n
-  const predicted = await read<Address>(ctx, ctx.deployment.factory, factoryAbi, 'predict', [node, version])
+  const version = (await read<bigint>(ctx, f, factoryAbi, 'versionCount', [node])) + 1n
+  const predicted = await read<Address>(ctx, f, factoryAbi, 'predict', [node, version])
   return {
     project,
-    bytes,
     size: bytes.length,
     contentHash: keccak256(bytes),
+    chunks,
+    uploads: singleTx ? [] : uploads,
+    singleTx,
     version,
     predicted,
     name: releaseName(ctx, project, version),
@@ -238,16 +284,31 @@ export async function planPublish(ctx: Ctx, project: string, bytes: Uint8Array):
   }
 }
 
-export async function publish(ctx: Ctx, plan: PublishPlan) {
+export type PublishStep = { kind: 'upload' | 'publish'; hash: Hash; gasUsed: bigint; chunks: number }
+
+/** Runs the plan. Resumable: re-planning after a failure skips chunks that made it onchain. */
+export async function publish(ctx: Ctx, plan: PublishPlan, onStep?: (step: PublishStep) => void) {
   const { account } = requireWallet(ctx)
-  const allowed = await read<boolean>(ctx, ctx.deployment.factory, factoryAbi, 'canPublish', [
-    plan.project,
-    account.address,
-  ])
+  const f = ctx.deployment.factory
+  const allowed = await read<boolean>(ctx, f, factoryAbi, 'canPublish', [plan.project, account.address])
   if (!allowed) throw new Error(`${account.address} may not publish to ${projectName(ctx, plan.project)}`)
-  const hash = await write(ctx, ctx.deployment.factory, factoryAbi, 'publish', [plan.project, toHex(plan.bytes)])
-  const receipt = await ctx.publicClient.getTransactionReceipt({ hash })
-  return { hash, gasUsed: receipt.gasUsed }
+
+  const steps: PublishStep[] = []
+  const run = async (kind: PublishStep['kind'], chunks: number, fn: string, args: unknown[]) => {
+    const hash = await write(ctx, f, factoryAbi, fn, args)
+    const { gasUsed } = await ctx.publicClient.getTransactionReceipt({ hash })
+    const step = { kind, hash, gasUsed, chunks }
+    steps.push(step)
+    onStep?.(step)
+  }
+
+  if (plan.singleTx) {
+    await run('publish', plan.chunks.length, 'publishContent', [plan.project, plan.chunks.map((c) => toHex(c.data))])
+  } else {
+    for (const batch of plan.uploads) await run('upload', batch.length, 'storeChunks', [batch.map((c) => toHex(c))])
+    await run('publish', plan.chunks.length, 'publish', [plan.project, plan.chunks.map((c) => c.pointer)])
+  }
+  return steps
 }
 
 /** Points `<project>.navik.eth` at a deployment: one ENS write on the project's resolver. */

@@ -67,14 +67,20 @@ program
   .action(async (project: string, file: string, opts: { promote?: boolean; dryRun?: boolean }) => {
     const c = await ctx()
     const plan = await navik.planPublish(c, project, new Uint8Array(readFileSync(file)))
+    const reused = plan.chunks.filter((ch) => ch.stored).length
+    const txs = plan.singleTx ? 1 : plan.uploads.length + 1
     console.log(`release      ${plan.name}`)
     console.log(`size         ${plan.size} / ${plan.maxSize} bytes`)
+    console.log(`chunks       ${plan.chunks.length} (${reused} already stored, ${plan.chunks.length - reused} new)`)
     console.log(`content hash ${plan.contentHash}`)
     console.log(`address      ${plan.predicted} (known before upload)`)
+    console.log(`transactions ${txs}${plan.singleTx ? ' (store + publish together)' : ''}`)
     if (opts.dryRun) return
 
-    const { hash, gasUsed } = await navik.publish(c, plan)
-    console.log(`published    tx ${hash} (gas ${gasUsed})`)
+    await navik.publish(c, plan, (step) => {
+      const what = step.kind === 'upload' ? `uploaded ${step.chunks} chunk(s)` : 'published'
+      console.log(`${what.padEnd(12)} tx ${step.hash} (gas ${step.gasUsed})`)
+    })
     if (opts.promote) {
       const tx = await navik.promote(c, project, plan.predicted)
       console.log(`promoted     ${navik.projectName(c, project)} → ${plan.name} (tx ${tx})`)
@@ -145,7 +151,10 @@ program
     if (releases.length === 0) console.log('  no releases yet')
     for (const r of releases) {
       const mark = live && getAddress(live) === getAddress(r.deployment) ? '● live' : '      '
-      console.log(`  ${mark}  ${r.name.padEnd(36)} ${r.deployment}  ${r.size} B  ${r.contentHash.slice(0, 10)}…`)
+      const chunks = `${r.chunks} chunk${r.chunks === 1 ? '' : 's'}`
+      console.log(
+        `  ${mark}  ${r.name.padEnd(36)} ${r.deployment}  ${r.size} B  ${chunks}  ${r.contentHash.slice(0, 10)}…`,
+      )
     }
     if (live && !releases.some((r) => getAddress(r.deployment) === getAddress(live))) {
       console.log(`  ● live  ${live} (not a release of this project)`)
