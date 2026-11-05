@@ -15,6 +15,8 @@ promoted     portfolio.navik.eth → 3.portfolio.navik.eth
 - **Every release gets a permanent name:** `<N>.<project>.navik.eth`, a real ENSv2 subname in the project's own registry, with no expiry and no roles. Nobody can change, transfer or remove it, including us and the project owner. `preview.<project>.navik.eth` follows the newest release.
 - **Production is `<project>.navik.eth`.** It is one `contentcontract` text record on the project's own ENSv2 Permissioned Resolver, so promote, rollback and demote are each one ENS write.
 - **Who may deploy is an ENSv2 permission.** The project owner grants a key "publish releases" and/or "change production", for that project only, and can revoke it at any time.
+- **Reading is private by default.** The dashboard and its built-in site viewer send every chain read through an [anon-rpc](https://ethereum.github.io/anon-rpc/) network (Nym by default). The RPC provider sees a mixnet exit, not who is looking at which project or site.
+- **Anyone can check that a site matches its source.** `navik verify <name> --against <build>` and `scripts/reproduce.sh` rebuild a site from its repo and compare it byte for byte with what the name serves.
 
 ## How it works
 
@@ -42,16 +44,64 @@ A custom domain can share a project's namespace. If `alice.eth` sets its subregi
 
 ## Dashboard
 
-`app/` is a dashboard for managing projects: connect a wallet, claim a project, drop in an HTML build, deploy, promote, roll back, take offline, and grant or revoke deploy keys. "View" fetches a release from Ethereum, checks its content hash, and opens it.
+`app/` is a dashboard for managing projects: connect a wallet, claim a project, drop in an HTML build, deploy, promote, roll back, take offline, and grant or revoke deploy keys. It is also a viewer for onchain sites: "Open a site" takes any ENS name with an ERC-8244 `contentcontract` record and works without a wallet. It:
+- resolves the name through ENSv2's UniversalResolver;
+- reads the bytes from Ethereum in parallel chunks;
+- checks they are a genuine Navik release with a matching content hash;
+- renders the site in a sandboxed frame with an opaque origin, so it cannot reach the dashboard or the wallet.
+
+You can drop a local build on the viewer to compare it with the release.
 
 It is hosted on Navik itself:
-- The build is one self-contained HTML file (~183 KB; published compressed as 4 chunks), with no CDN, fonts or analytics. It talks only to the connected wallet's RPC, and transactions are signed by the wallet.
+- The build is one self-contained HTML file (~260 KB, published compressed as 5 chunks), with no CDN, fonts or analytics. Its only external fetch is the pinned anon-rpc worker code.
 - It is published to the root project `app.navik.eth`, so `navik.eth` serves it.
 - Every version of the dashboard keeps its own permanent name (`1.app.navik.eth`, …).
+- The build is reproducible, so anyone can check that `navik.eth` serves the code in this repo (see [Verify a site against its source](#verify-a-site-against-its-source)).
 
 ```bash
 PRIVATE_KEY=0x… ./scripts/deploy-app.sh   # build for the connected chain, deploy compressed to app.navik.eth, promote
 ```
+
+## Private reads (anon-rpc)
+
+A dapp's RPC provider normally sees your IP next to every address and name you look up. Here, it would see which projects you manage and which sites you open. The dashboard closes that leak with [anon-rpc](https://ethereum.github.io/anon-rpc/), via `@anon-rpc/browser-harness` (`app/src/reads.ts`):
+
+- **Every read goes through an anon-rpc worker:** ENS resolution, project and release listings, permission checks, event logs, gas simulation, transaction receipts and site bytes. The worker runs in a null-origin sandboxed iframe, and viem's `http()` transport uses its `fetch`.
+- **The wallet only signs.** The app sends the wallet just `eth_requestAccounts`, `eth_chainId`, `wallet_switchEthereumChain` and `eth_sendTransaction`. This exclusion is deliberate: a broadcast transaction is public anyway. The dashboard e2e asserts that the wallet receives no reads.
+- **The worker code is pinned in the app.** The harness normally reads each network's code hash from its specifier contract over a plain RPC before anything is anonymized. Navik instead embeds the hash and resolver URLs at build time. The harness still checks `keccak256(bundle)` before running it. As a result, no un-anonymized bootstrap read is ever made, and a given dashboard release (itself immutable) always runs the anonymizer code it was published with.
+- **It fails closed.** If the network is unreachable, reads stop with an error and a Reconnect button. Nothing silently falls back to a direct connection.
+- **Unrelated reads are kept apart.** The dashboard (keyed by account) and each opened site use separate `isolationKey`s, asking the network not to link them. Support depends on the network.
+- **You can see where everything went.** The header shows the active network and how many calls went through anon-rpc. Clicking it opens a panel with a percentage meter, every request (route, method, latency, size) and the worker's log. There you can switch the network or RPC endpoint.
+
+| Network | Anonymizes | Connect | Per read (batch) | Worker size |
+|---|---|---|---|---|
+| **Nym** (default on mainnet) | yes: Sphinx mixnet, exits at a Nym IP Packet Router | ~6 s | ~0.6 s | 3.9 MB (brotli) |
+| Nox | yes: Sphinx mixnet, TLS to the RPC end to end | ~1.5 s | ~1 s | 0.5 MB |
+| Tor | yes: Tor in WebAssembly via a KPS gateway | slow first circuit | — | 2.2 MB |
+| Passthrough (default on the local fork) | no: reference worker, same sandbox | <1 s | direct | tiny |
+| Direct | no: plain `fetch`, labelled as exposed | — | direct | — |
+
+All numbers were measured from headless Chromium. The Tor demo gateway could not be reached while this was written. No mixnet exit can reach `127.0.0.1`, so the local fork uses the passthrough worker. It exercises the same harness, sandbox and code path, but it does not anonymize. Throughput over Nym is about 15–20 KB/s. Because mixnet round trips are slow:
+- reads are batched into JSON-RPC batches;
+- release chunks and release listings are read in parallel;
+- compression (below) matters: the dashboard is 5 chunks instead of 11.
+
+The CLI is not covered: anon-rpc has no published Node harness yet. Point `--rpc` at your own node if you need private CLI reads.
+
+## Verify a site against its source
+
+Every release stores its content hash, and `navik verify` checks the bytes against it. To also prove those bytes were built from a given source tree, rebuild the site and compare:
+
+```bash
+# any name with a contentcontract record; matches the original document of gzip-wrapped releases
+node cli/src/cli.ts verify portfolio.navik.eth --against ./dist/index.html
+
+# clone, build and compare in one step, e.g. the dashboard navik.eth serves
+scripts/reproduce.sh navik.eth https://github.com/<org>/navik <commit> \
+  "pnpm install --frozen-lockfile && NAVIK_CHAINS=1 pnpm -C app build" app/dist/index.html
+```
+
+The viewer has the same check: drop the file on "Compare with a local build". The dashboard's own build is deterministic: the lockfile pins every dependency, and the deployment addresses are committed. `scripts/test-all.sh` rebuilds it after publishing and checks that the rebuild matches what `navik.eth` serves.
 
 ## ENSv2 features used
 
@@ -70,19 +120,27 @@ PRIVATE_KEY=0x… ./scripts/deploy-app.sh   # build for the connected chain, dep
 
 ## CROPS
 
-**Censorship resistance.**
-- Site bytes live in Ethereum bytecode, and names are ENS records on Ethereum.
-- There is no server, gateway or indexer in the read path. Any ENS-aware client, or `navik open`, can load a site with only an RPC endpoint.
+- **C:** We control the `navik.eth` name, and nothing else is ours: no server, gateway, indexer or relayer. Sites, names and the dashboard all live on Ethereum, and any RPC can serve them. If we disappear, renewing `navik.eth` is permissionless. Once it is frozen, we cannot repoint it either. If an anon-rpc network or RPC provider refuses you, pick another network or endpoint in the privacy panel.
+- **O:** MIT. The repo alone builds and runs everything: contracts, CLI, dashboard and a local mainnet fork. The dashboard build is reproducible, and `scripts/reproduce.sh` proves that `navik.eth` serves this code.
+- **P:** By default the RPC provider sees reads arriving from a Nym exit, not your IP. The wallet only sees signing requests. The CDN serving the pinned anon-rpc worker sees that you use it, but not what you read. Navik runs no backend and no analytics. Details are [below](#what-each-party-learns).
+- **S:** Keys never leave your wallet. The anon-rpc worker is hash-pinned code in a null-origin sandbox, and opened sites run sandboxed with no access to the dashboard or wallet. Releases are checked against their onchain content hash. The trust assumptions are your RPC's answers and ENSv2's core contracts; see the security phases below.
 
-**Open source.**
-- MIT licensed.
-- None of the contracts has an owner, an admin function or an upgrade path.
+### What each party learns
 
-**Privacy.**
-- No backend, accounts or analytics.
-- The CLI talks only to the RPC you choose.
+| Party | Learns | Does not learn |
+|---|---|---|
+| RPC provider (default `ethereum-rpc.publicnode.com`, reached through the mixnet) | The reads themselves: names, project accounts, release addresses. Reads under one `isolationKey` may be linkable to each other | Your IP. Which reads belong to the same person across isolation keys (if the network honours them) |
+| anon-rpc network (Nym mix nodes and exit) | Mix nodes: nothing. Exit: that some client is talking to the RPC host | Who you are; with Nox, the request contents (TLS ends inside the worker) |
+| Worker CDN (jsDelivr, unpkg or GitHub, one fetch per network, cached) | Your IP, and that you load an anon-rpc worker | Anything you read |
+| Your wallet and its RPC | Your account, chain and the transactions you sign (public once sent) | What you browse or manage in the dashboard |
+| Navik (the team) | Nothing: there is no server | — |
+| Sites you open in the viewer | Nothing about the dashboard: opaque origin, no wallet | — |
 
-**Security.** Navik has two phases:
+The CLI talks only to the RPC you pass. It has no anon-rpc support yet (see [Private reads](#private-reads-anon-rpc)).
+
+### Security
+
+Navik has two phases:
 
 1. **Testing.** The navik.eth owner keeps the ENSv2 roles to repoint navik.eth's registry and resolver, so a broken deployment can be replaced. That power covers the whole namespace: repointing navik.eth hides every project and release name served by the old contracts. The releases themselves, their bytes and their addresses are untouched.
 2. **Frozen.** `Freeze.s.sol` revokes those roles, including the admin roles that could grant them back, from every holder. Then it checks onchain that nobody holds them. This is irreversible. `navik info` reports which phase a deployment is in, read from the chain.
@@ -104,7 +162,7 @@ Remaining assumptions, stated plainly:
 - **navik.eth must stay renewed.** Renewal is permissionless, so anyone can pay to keep it alive.
 - **Release addresses never depend on ENS.** Every release stays readable at its contract address even if ENS changes.
 
-`navik verify <name>` checks a site without trusting anyone. It resolves the name through ENSv2's UniversalResolver, then checks three things:
+`navik verify <name>` checks a site without trusting Navik; it trusts only the RPC's answers. It resolves the name through ENSv2's UniversalResolver, then checks three things:
 - the target is a genuine factory release (its CREATE3 address matches), not a look-alike;
 - the release belongs to the named project;
 - `keccak256(html())` equals the content hash in the release manifest.
@@ -129,12 +187,14 @@ node src/cli.ts grant portfolio 0xCI… --permission publish   # preview-only ke
 node src/cli.ts rollback portfolio v1
 node src/cli.ts ls portfolio
 node src/cli.ts verify portfolio
+node src/cli.ts verify portfolio --against ./index.html      # is this build what's live?
 node src/cli.ts open 2.portfolio.navik.eth
 
 # full CLI flow (claim → deploy → grants → rollback → multi-chunk → revoke → isolation → demote)
 pnpm run e2e
 
-# dashboard: dev server, or the headless-browser e2e (wallet injected, talks to the fork)
+# dashboard: dev server, or the headless-browser e2e (wallet injected; reads go through the
+# passthrough anon-rpc worker to the fork, and the test asserts the wallet only signs)
 cd ../app && pnpm dev
 pnpm run e2e
 # the same test against the exact (compressed) bytes navik.eth serves, fetched from the chain
@@ -183,7 +243,7 @@ Mainnet caps a transaction at 2^24 gas (EIP-7825), so the CLI uploads at most 2 
 
 | Site | Raw | Compressed |
 |---|---|---|
-| Navik dashboard (JS bundle) | 183 KB, 8 chunks | 77 KB, 4 chunks |
+| Navik dashboard (JS bundle, incl. the anon-rpc harness) | 260 KB, 11 chunks | 108 KB, 5 chunks (~24M gas) |
 | Text-heavy page | 114 KB, 5 chunks, ~27M gas | 9 KB, 1 chunk, 2.2M gas |
 
 Trade-offs:
@@ -194,5 +254,7 @@ Trade-offs:
 ## Limits (MVP)
 
 - **Single-file sites:** one prebuilt HTML document of up to 64 chunks (1,572,800 bytes).
-- **No viewer:** browsers that support ERC-8244 `contentcontract`, `navik open`, or "View" in the dashboard render the sites.
+- **Viewer sandbox:** sites opened in the dashboard run without wallet access. Sites that need a wallet render in ERC-8244 browsers or through `navik open`.
+- **Read integrity:** reads are anonymized but not proven. A lying RPC could serve a false release consistently with its manifest. A light client or `eth_getProof` checks would remove that trust.
+- **CLI reads are not anonymized** (no Node anon-rpc harness yet).
 - **Dashboard wallets:** browser-injected wallets only (EIP-6963), no WalletConnect, so there's no relay server.
