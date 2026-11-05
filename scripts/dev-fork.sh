@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Local mainnet fork with Navik deployed: anvil on :8545 (chain id 31337).
 # navik.eth is registered to anvil account #0 by impersonating ENSv2's ETHRegistrar,
-# with the same roles a real purchase grants, then Deploy.s.sol attaches and locks it.
+# with the same roles a real purchase grants, then Deploy.s.sol attaches it (not frozen).
+# FREEZE=1 also runs Freeze.s.sol, removing the power to repoint navik.eth.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MAINNET_RPC_URL="${MAINNET_RPC_URL:-https://ethereum-rpc.publicnode.com}"
+MAINNET_RPC_URL="${MAINNET_RPC_URL:-https://eth.drpc.org}"
 RPC=http://127.0.0.1:8545
 ROOT_LABEL="${ROOT_LABEL:-navik}"
 # anvil default account #0
@@ -38,4 +39,8 @@ echo "registered $ROOT_LABEL.eth to $OWNER"
 
 cd "$ROOT_DIR/contracts"
 ROOT_LABEL="$ROOT_LABEL" forge script script/Deploy.s.sol --rpc-url "$RPC" --private-key "$OWNER_KEY" --broadcast --slow -q
-cat deployments/31337.json
+if [[ "${FREEZE:-0}" == "1" ]]; then
+  ROOT_LABEL="$ROOT_LABEL" CONFIRM_FREEZE="$ROOT_LABEL.eth" \
+    forge script script/Freeze.s.sol --rpc-url "$RPC" --private-key "$OWNER_KEY" --broadcast --slow -q
+fi
+cat deployments/31337.json && echo
