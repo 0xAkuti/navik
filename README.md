@@ -5,36 +5,40 @@ Vercel-style deployments for fully onchain websites, controlled by ENSv2.
 ```text
 navik deploy portfolio ./index.html --promote
 
-release      portfolio-v3.navik.eth
+release      3.portfolio.navik.eth
 size         21,402 / 24,575 bytes
 address      0x7469…c9Be (known before upload)
-promoted     portfolio.navik.eth → portfolio-v3.navik.eth
+promoted     portfolio.navik.eth → 3.portfolio.navik.eth
 ```
 
 - **Every release is an immutable ERC-8244 contract.** `html()` returns the site, stored in contract bytecode on Ethereum in chunks of up to 24,575 bytes. Sites can be up to about 1.5 MB; unchanged chunks are never uploaded twice.
-- **Every release gets a permanent name:** `<project>-v<N>.navik.eth`. Nobody can change or remove it, including us.
+- **Every release gets a permanent name:** `<N>.<project>.navik.eth`, a real ENSv2 subname in the project's own registry, with no expiry and no roles. Nobody can change, transfer or remove it, including us and the project owner. `preview.<project>.navik.eth` follows the newest release.
 - **Production is `<project>.navik.eth`.** It is one `contentcontract` text record on the project's own ENSv2 Permissioned Resolver, so promote, rollback and demote are each one ENS write.
 - **Who may deploy is an ENSv2 permission.** The project owner grants a key "publish releases" and/or "change production", for that project only, and can revoke it at any time.
 
 ## How it works
 
 ```text
-navik.eth                              resolver: NavikResolver (wildcard, immutable)
-│                                      subregistry: Navik UserRegistry (no admin)
-│                                      serves app.navik.eth's production (the dashboard)
-├─ portfolio.navik.eth                 owner: alice · resolver: alice's PermissionedResolver
-│     text contentcontract = 0x…v3     ← production, set by alice or a key she granted
-├─ portfolio-v1.navik.eth   ┐
-├─ portfolio-v2.navik.eth   ├─ not registered: ENSv2 falls back to navik.eth's resolver,
-└─ portfolio-v3.navik.eth   ┘  which computes the answer from the factory (no writes, no admin)
+navik.eth                         resolver: NavikResolver (serves app.navik.eth's production: the dashboard)
+│                                 subregistry: Navik registry (no admin, parent locked)
+└─ portfolio.navik.eth            owner: alice · resolver: alice's Permissioned Resolver
+   │                                text contentcontract = 0x…v3   ← production (alice, or a key she granted)
+   │                              subregistry: portfolio's release registry (no admin, parent locked,
+   │                                the factory is its only registrar; alice cannot swap it)
+   ├─ 1.portfolio.navik.eth       ┐ registered by each publish: held by the factory, no roles,
+   ├─ 2.portfolio.navik.eth       ├ never expires; resolver = the release contract itself
+   ├─ 3.portfolio.navik.eth       ┘
+   └─ preview.portfolio.navik.eth   resolver repointed by the factory to the newest release
 ```
+
+A custom domain can share a project's namespace. If `alice.eth` sets its subregistry to the project's release registry and links its record to the project (`linkToNode`), then `alice.eth` serves production, and `3.alice.eth` and `preview.alice.eth` work with no extra records.
 
 | Contract | Role |
 |---|---|
-| `NavikRegistrar` | Creates the Navik UserRegistry and hands out `<project>.navik.eth`. Each project gets its own Permissioned Resolver with the creator as the only role holder. It claims the root project (`app`) at deploy, so nobody can front-run it |
-| `NavikFactory` | `storeChunks(chunks)` stores content chunks. It is permissionless and addressed by content, so identical chunks are stored once across all projects. `publish(project, pointers)` deploys release `vN` at `CREATE3(keccak(project, N))`, computing the content hash onchain. `publishContent` does both in one transaction for small sites |
-| `Deployment` | One release. ERC-8244 `html()` concatenates its chunks. `chunkCount()` and `chunk(i)` serve RPCs that limit `eth_call` size. `manifest()` returns project, version, content hash, size and chunk pointers. A clone with immutable args: no storage, no owner |
-| `NavikResolver` | Resolver of navik.eth. Answers `contentcontract`, `addr`, `navik.version`, `navik.project` and `navik.contenthash` for `<project>-v<N>.navik.eth`. Unknown versions never resolve. Queries for `navik.eth` itself are forwarded to the root project's resolver, so navik.eth follows its promotions and rollbacks |
+| `NavikRegistrar` | Creates the Navik registry and the factory, and hands out `<project>.navik.eth`. Each project gets its own Permissioned Resolver (creator is the only role holder) and its own release registry (`preview` registered, the factory as sole registrar). The registrar keeps no role. It claims the root project (`app`) at deploy, so nobody can front-run it |
+| `NavikFactory` | `storeChunks(chunks)` stores content chunks. It is permissionless and addressed by content, so identical chunks are stored once across all projects. `publish(project, pointers)` deploys release N at `CREATE3(keccak(project, N))`, computing the content hash onchain, registers `<N>.<project>.navik.eth` and repoints `preview`. `publishContent` stores and publishes in one transaction for small sites |
+| `Deployment` | One release. ERC-8244 `html()` concatenates its chunks. `chunkCount()` and `chunk(i)` serve RPCs that limit `eth_call` size. `manifest()` returns project, version, content hash, size and chunk pointers. It is also the ENS resolver of its own name(s): `contentcontract` and `addr` return its address. A clone with immutable args: no storage, no owner |
+| `NavikResolver` | Resolver of navik.eth. Forwards queries for `navik.eth` itself to the root project's resolver, so navik.eth follows its promotions and rollbacks. Unregistered names under navik.eth do not resolve |
 
 ## Dashboard
 
@@ -43,7 +47,7 @@ navik.eth                              resolver: NavikResolver (wildcard, immuta
 It is hosted on Navik itself:
 - The build is one self-contained HTML file (~183 KB; published compressed as 4 chunks), with no CDN, fonts or analytics. It talks only to the connected wallet's RPC, and transactions are signed by the wallet.
 - It is published to the root project `app.navik.eth`, so `navik.eth` serves it.
-- Every version of the dashboard keeps its own permanent name (`app-v1.navik.eth`, …).
+- Every version of the dashboard keeps its own permanent name (`1.app.navik.eth`, …).
 
 ```bash
 PRIVATE_KEY=0x… ./scripts/deploy-app.sh   # build for the connected chain, deploy compressed to app.navik.eth, promote
@@ -53,13 +57,16 @@ PRIVATE_KEY=0x… ./scripts/deploy-app.sh   # build for the connected chain, dep
 
 | ENSv2 feature | What it does in Navik | Change it → what users see |
 |---|---|---|
-| Hierarchical registries (navik.eth → Navik UserRegistry) | Our namespace of projects | Swappable by the navik.eth owner until frozen, then by nobody |
+| Hierarchical registries (navik.eth → Navik registry → one registry per project) | Namespace of projects, and of each project's releases | Swappable by the navik.eth owner until frozen, then by nobody |
+| Own subname registry per project (UserRegistry via VerifiableFactory) | Tokenized release names `<N>.<project>`, managed by the factory's rules | Locked: the owner has no right to swap the subregistry |
+| Forever, non-transferable names with no parent control | Release names: no expiry, no roles, emancipated registry | Cannot change, move or disappear |
 | Tokenized subnames (ERC-1155) owned by users | Who owns a project | Owner transfers → new wallet controls it |
-| Registry walk with resolver fallback (ENSIP-10) | Permanent release names with zero writes | Cannot change; unknown versions do not resolve |
+| A resolver per name | Each release resolves itself; `preview`'s resolver is repointed per publish | Publish → preview moves; releases never do |
+| Namespace aliasing via a shared registry + record aliasing (`linkToNode`) | Custom domains: `alice.eth`, `3.alice.eth`, `preview.alice.eth` | Unlink → the domain stops following |
 | One Permissioned Resolver per project, deployed via VerifiableFactory | What is live: `text("contentcontract")` | Set it → site changes; set an older release → rollback |
 | Enhanced Access Control, setter-scoped grants (`grantSetterRoles`) | Least-privilege deploy keys: `navik.publish` vs `contentcontract` | Revoke → the key's next deploy reverts |
 | Per-project EAC scope | Isolation: a key for one project is useless on another | — |
-| Emancipation (no root admin on the Navik registry) | Nobody can unregister, repoint or upgrade project names | — |
+| Emancipation and locked parents (no root admin on the Navik or release registries) | Nobody can unregister, repoint or upgrade project or release names | — |
 
 ## CROPS
 
@@ -87,10 +94,10 @@ What each party can and cannot do:
 | Navik team (navik.eth owner) | Renew navik.eth (anyone can) | Unregister, take or repoint a project; publish to it; change production; alter a release |
 | | Before the freeze only: repoint navik.eth to other Navik contracts | After the freeze: repoint navik.eth at all |
 | Navik contracts | — | Hold any role on project names or project resolvers |
-| Project creator | Publish releases; promote, roll back, demote; grant and revoke keys; transfer the name | Change or delete a published release, or its name |
+| Project creator | Publish releases; promote, roll back, demote; grant and revoke keys; transfer the name | Change or delete a published release or its name; swap the project's release registry |
 | Key granted `publish` | Publish releases of that project | Change production; touch other projects |
 | Key granted `promote` | Change that project's production | Publish (unless also granted); touch other projects |
-| Anyone | Read and verify everything | Claim a release-shaped label (`*-v<N>`) |
+| Anyone | Read and verify everything | Register or change a release name (only a publish registers `<N>.<project>`) |
 
 Remaining assumptions, stated plainly:
 - **ENSv2 core contracts.** The ETHRegistry reports itself emancipated, meaning no root override.
@@ -122,7 +129,7 @@ node src/cli.ts grant portfolio 0xCI… --permission publish   # preview-only ke
 node src/cli.ts rollback portfolio v1
 node src/cli.ts ls portfolio
 node src/cli.ts verify portfolio
-node src/cli.ts open portfolio-v2.navik.eth
+node src/cli.ts open 2.portfolio.navik.eth
 
 # full CLI flow (claim → deploy → grants → rollback → multi-chunk → revoke → isolation → demote)
 pnpm run e2e
@@ -164,7 +171,8 @@ Measured on a mainnet fork:
 |---|---|
 | Store one full chunk (24,575 B) | ~5.4M |
 | Store + publish a site of up to 2 full chunks (one tx, `publishContent`) | 11.8M for 49,150 B |
-| Publish already-stored chunks | ~210–275k |
+| Publish already-stored chunks (incl. naming the release) | ~370k |
+| Claim a project (resolver + release registry) | ~720k |
 | Read `html()` of a 491 KB site (`eth_call`) | 2.85M |
 
 Mainnet caps a transaction at 2^24 gas (EIP-7825), so the CLI uploads at most 2 chunks per transaction. An upload interrupted halfway resumes: re-running `deploy` skips chunks that are already onchain.
