@@ -98,6 +98,13 @@ grep -Eq "compressed   [0-9]+ → [0-9]+ bytes \([0-9]+ → 1 chunks\)" "$WORK/o
 navik verify "5.$PROJECT" --out "$WORK/zip-fetched.html" | tee "$WORK/out"
 grep -q "gzip-wrapped: original" "$WORK/out"
 cmp "$WORK/zip-fetched.html" "$WORK/zip.html" && echo "  decompressed bytes == original bytes ($(wc -c < "$WORK/zip.html") B)"
+navik verify "5.$PROJECT" --against "$WORK/zip.html" | grep -q "byte-identical to the original document" \
+  && echo "  --against: the local build matches the release"
+if navik verify "5.$PROJECT" --against "$WORK/big.html" >/dev/null; then
+  echo "verify --against a different file should fail" >&2
+  exit 1
+fi
+echo "  --against: a different build is rejected"
 navik verify "5.$PROJECT" --raw --out "$WORK/zip-raw.html" >/dev/null
 base64 -d <<<"$(grep -o 'atob("[^"]*")' "$WORK/zip-raw.html" | sed 's/atob("//; s/")$//')" | gunzip | cmp - "$WORK/zip.html" \
   && echo "  stored loader decodes with standard tools: base64 -d | gunzip"
