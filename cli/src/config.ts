@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { type Ctx, type NavikDeployment } from '@navik/sdk'
-import { type Chain, createPublicClient, createWalletClient, type Hex, http, type PublicClient } from 'viem'
+import { type Chain, createPublicClient, createWalletClient, type Hex, http } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { mainnet } from 'viem/chains'
 
@@ -22,11 +22,11 @@ export async function loadCtx(opts: GlobalOptions): Promise<Ctx> {
   // a local fork (31337) runs mainnet ENSv2 state under another chain id
   const chain: Chain = chainId === mainnet.id ? mainnet : { ...mainnet, id: chainId, name: 'Mainnet fork' }
   const transport = http(rpc)
-  const publicClient = createPublicClient({ chain, transport }) as PublicClient
+  const publicClient = createPublicClient({ chain, transport })
 
   const key = process.env.PRIVATE_KEY as Hex | undefined
   if (!key) return { deployment, publicClient }
   const account = privateKeyToAccount(key)
   const walletClient = createWalletClient({ account, chain, transport })
-  return { deployment, publicClient, walletClient, account }
+  return { deployment, publicClient, account: account.address, send: (tx) => walletClient.sendTransaction(tx) }
 }

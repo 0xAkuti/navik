@@ -40,7 +40,7 @@ program
     console.log(`registry    ${d.registry}`)
     console.log(`factory     ${d.factory}`)
     console.log(`resolver    ${d.resolver}`)
-    if (c.account) console.log(`account     ${c.account.address}`)
+    if (c.account) console.log(`account     ${c.account}`)
   })
 
 program

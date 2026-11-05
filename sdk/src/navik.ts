@@ -1,13 +1,23 @@
 import {
+  getCode,
+  getContractEvents,
+  getTransactionReceipt,
+  readContract,
+  simulateContract,
+  waitForTransactionReceipt,
+} from 'viem/actions'
+import {
   type Abi,
   type Address,
   concatBytes,
+  decodeFunctionResult,
   encodeFunctionData,
   getAddress,
   type Hash,
   type Hex,
   hexToBytes,
   keccak256,
+  namehash,
   toHex,
   zeroAddress,
 } from 'viem'
@@ -21,6 +31,8 @@ import {
   resolverAbi,
   ROLE_SET_TEXT,
   ROOT_CONTROL_ROLES,
+  textResolverAbi,
+  universalResolverAbi,
 } from './abi.ts'
 import { type Ctx, requireWallet } from './types.ts'
 import { dnsEncode, isValidProjectLabel, parseContentContract, parseReleaseLabel, textResource } from './names.ts'
@@ -71,12 +83,18 @@ export async function deploymentOf(ctx: Ctx, project: string, version: bigint): 
 
 /** Resolves `contentcontract` the way any ENS client does: via ENSv2's UniversalResolver. */
 export async function resolveContentContract(ctx: Ctx, name: string): Promise<Address | undefined> {
-  const value = await ctx.publicClient.getEnsText({
-    name,
-    key: PRODUCTION_KEY,
-    universalResolverAddress: ctx.deployment.universalResolver,
-  })
-  return value ? parseContentContract(value) : undefined
+  const dns = dnsEncode(name)
+  const data = encodeFunctionData({ abi: textResolverAbi, functionName: 'text', args: [namehash(name), PRODUCTION_KEY] })
+  try {
+    const [result] = await read<readonly [Hex, Address]>(ctx, ctx.deployment.universalResolver, universalResolverAbi, 'resolve', [
+      dns,
+      data,
+    ])
+    const value = decodeFunctionResult({ abi: textResolverAbi, functionName: 'text', data: result })
+    return value ? parseContentContract(value) : undefined
+  } catch {
+    return undefined // no resolver, unknown release, or unsupported record
+  }
 }
 
 export type RootStatus = {
@@ -218,7 +236,7 @@ export async function fetchHtml(ctx: Ctx, deployment: Address): Promise<Uint8Arr
 export async function claim(ctx: Ctx, project: string, owner?: Address) {
   if (!isValidProjectLabel(project)) throw new Error(`invalid project name "${project}"`)
   const { account } = requireWallet(ctx)
-  const hash = await write(ctx, ctx.deployment.registrar, registrarAbi, 'claim', [project, owner ?? account.address])
+  const hash = await write(ctx, ctx.deployment.registrar, registrarAbi, 'claim', [project, owner ?? account])
   const resolver = await read<Address>(ctx, ctx.deployment.registry, registryAbi, 'getResolver', [project])
   return { hash, resolver, name: projectName(ctx, project) }
 }
@@ -258,7 +276,7 @@ export async function planPublish(ctx: Ctx, project: string, bytes: Uint8Array):
   for (let i = 0; i < bytes.length; i += chunkSize) {
     const data = bytes.subarray(i, i + chunkSize)
     const pointer = await read<Address>(ctx, f, factoryAbi, 'chunkPointer', [toHex(data)])
-    const code = await ctx.publicClient.getCode({ address: pointer })
+    const code = await getCode(ctx.publicClient, { address: pointer })
     chunks.push({ data, pointer, stored: code !== undefined && code !== '0x' })
   }
   const missing = chunks.filter((c) => !c.stored).map((c) => c.data)
@@ -290,13 +308,13 @@ export type PublishStep = { kind: 'upload' | 'publish'; hash: Hash; gasUsed: big
 export async function publish(ctx: Ctx, plan: PublishPlan, onStep?: (step: PublishStep) => void) {
   const { account } = requireWallet(ctx)
   const f = ctx.deployment.factory
-  const allowed = await read<boolean>(ctx, f, factoryAbi, 'canPublish', [plan.project, account.address])
-  if (!allowed) throw new Error(`${account.address} may not publish to ${projectName(ctx, plan.project)}`)
+  const allowed = await read<boolean>(ctx, f, factoryAbi, 'canPublish', [plan.project, account])
+  if (!allowed) throw new Error(`${account} may not publish to ${projectName(ctx, plan.project)}`)
 
   const steps: PublishStep[] = []
   const run = async (kind: PublishStep['kind'], chunks: number, fn: string, args: unknown[]) => {
     const hash = await write(ctx, f, factoryAbi, fn, args)
-    const { gasUsed } = await ctx.publicClient.getTransactionReceipt({ hash })
+    const { gasUsed } = await getTransactionReceipt(ctx.publicClient, { hash })
     const step = { kind, hash, gasUsed, chunks }
     steps.push(step)
     onStep?.(step)
@@ -361,7 +379,7 @@ export async function permissionsOf(ctx: Ctx, project: string, account: Address)
  * ranges may be rejected by some RPCs; callers should keep a local list as a fallback.
  */
 export async function projectsOf(ctx: Ctx, owner: Address): Promise<string[]> {
-  const logs = await ctx.publicClient.getContractEvents({
+  const logs = await getContractEvents(ctx.publicClient, {
     address: ctx.deployment.registrar,
     abi: registrarAbi,
     eventName: 'ProjectClaimed',
@@ -378,7 +396,7 @@ export type KeyGrant = { account: Address; publish: boolean; promote: boolean }
 /** Accounts holding a `grant`ed permission on the project's resolver right now (owner excluded). */
 export async function listKeys(ctx: Ctx, project: string): Promise<KeyGrant[]> {
   const resolver = await projectResolver(ctx, project)
-  const logs = await ctx.publicClient.getContractEvents({
+  const logs = await getContractEvents(ctx.publicClient, {
     address: resolver,
     abi: resolverAbi,
     eventName: 'EACRolesChanged',
@@ -408,15 +426,15 @@ export async function hasPermission(ctx: Ctx, project: string, account: Address,
 // ---------------------------------------------------------------- helpers
 
 async function read<T>(ctx: Ctx, address: Address, abi: Abi, functionName: string, args: unknown[] = []): Promise<T> {
-  return (await ctx.publicClient.readContract({ address, abi, functionName, args })) as T
+  return (await readContract(ctx.publicClient, { address, abi, functionName, args })) as T
 }
 
 /** Simulates first (decoded revert reasons, gas estimate), then sends and waits. */
 async function write(ctx: Ctx, address: Address, abi: Abi, functionName: string, args: unknown[]): Promise<Hash> {
-  const { walletClient, account } = requireWallet(ctx)
-  const { request } = await ctx.publicClient.simulateContract({ address, abi, functionName, args, account })
-  const hash = await walletClient.writeContract(request as Parameters<typeof walletClient.writeContract>[0])
-  const receipt = await ctx.publicClient.waitForTransactionReceipt({ hash })
+  const { account, send } = requireWallet(ctx)
+  await simulateContract(ctx.publicClient, { address, abi, functionName, args, account })
+  const hash = await send({ to: address, data: encodeFunctionData({ abi, functionName, args }) })
+  const receipt = await waitForTransactionReceipt(ctx.publicClient, { hash })
   if (receipt.status !== 'success') throw new Error(`transaction ${hash} reverted`)
   return hash
 }

@@ -1,4 +1,4 @@
-import type { Account, Address, Chain, Hex, PublicClient, Transport, WalletClient } from 'viem'
+import type { Address, Chain, Client, Hash, Hex, Transport } from 'viem'
 
 /** Contents of contracts/deployments/<chainId>.json (written by Deploy.s.sol). */
 export type NavikDeployment = {
@@ -15,14 +15,21 @@ export type NavikDeployment = {
   universalResolver: Address
 }
 
+/** Sends a transaction from `Ctx.account` and returns its hash (the caller signs: wallet or key). */
+export type Send = (tx: { to: Address; data: Hex }) => Promise<Hash>
+
+/**
+ * `publicClient` is a plain viem client: the SDK calls tree-shakable actions (`viem/actions`) on
+ * it, so browser bundles only include what is used. Writing needs `account` and `send`.
+ */
 export type Ctx = {
   deployment: NavikDeployment
-  publicClient: PublicClient
-  walletClient?: WalletClient<Transport, Chain, Account>
-  account?: Account
+  publicClient: Client<Transport, Chain>
+  account?: Address
+  send?: Send
 }
 
-export function requireWallet(ctx: Ctx): { walletClient: WalletClient<Transport, Chain, Account>; account: Account } {
-  if (!ctx.walletClient || !ctx.account) throw new Error('connect a wallet to send transactions')
-  return { walletClient: ctx.walletClient, account: ctx.account }
+export function requireWallet(ctx: Ctx): { account: Address; send: Send } {
+  if (!ctx.send || !ctx.account) throw new Error('connect a wallet to send transactions')
+  return { account: ctx.account, send: ctx.send }
 }

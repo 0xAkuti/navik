@@ -66,3 +66,9 @@ export const resolverAbi = parseAbi([
 
 /** PermissionedResolverLib.ROLE_SET_TEXT */
 export const ROLE_SET_TEXT = 1n << 4n
+
+export const universalResolverAbi = parseAbi([
+  'function resolve(bytes name, bytes data) view returns (bytes result, address resolver)',
+])
+
+export const textResolverAbi = parseAbi(['function text(bytes32 node, string key) view returns (string)'])
