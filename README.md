@@ -41,12 +41,12 @@ navik.eth                              resolver: NavikResolver (wildcard, immuta
 `app/` is a dashboard for managing projects: connect a wallet, claim a project, drop in an HTML build, deploy, promote, roll back, take offline, and grant or revoke deploy keys. "View" fetches a release from Ethereum, checks its content hash, and opens it.
 
 It is hosted on Navik itself:
-- The build is one self-contained HTML file (~181 KB, 8 chunks), with no CDN, fonts or analytics. It talks only to the connected wallet's RPC, and transactions are signed by the wallet.
+- The build is one self-contained HTML file (~183 KB; published compressed as 4 chunks), with no CDN, fonts or analytics. It talks only to the connected wallet's RPC, and transactions are signed by the wallet.
 - It is published to the root project `app.navik.eth`, so `navik.eth` serves it.
 - Every version of the dashboard keeps its own permanent name (`app-v1.navik.eth`, …).
 
 ```bash
-PRIVATE_KEY=0x… ./scripts/deploy-app.sh   # build for the connected chain, deploy to app.navik.eth, promote
+PRIVATE_KEY=0x… ./scripts/deploy-app.sh   # build for the connected chain, deploy compressed to app.navik.eth, promote
 ```
 
 ## ENSv2 features used
@@ -130,8 +130,8 @@ pnpm run e2e
 # dashboard: dev server, or the headless-browser e2e (wallet injected, talks to the fork)
 cd ../app && pnpm dev
 pnpm run e2e
-# the same test against the copy served by navik.eth, fetched from the chain
-APP_FILE=$(node ../cli/src/cli.ts open navik.eth | sed 's#file://##') node test/e2e.ts
+# the same test against the exact (compressed) bytes navik.eth serves, fetched from the chain
+node ../cli/src/cli.ts verify navik.eth --raw --out /tmp/navik.html && APP_FILE=/tmp/navik.html node test/e2e.ts
 ```
 
 ### Mainnet
@@ -168,6 +168,20 @@ Measured on a mainnet fork:
 | Read `html()` of a 491 KB site (`eth_call`) | 2.85M |
 
 Mainnet caps a transaction at 2^24 gas (EIP-7825), so the CLI uploads at most 2 chunks per transaction. An upload interrupted halfway resumes: re-running `deploy` skips chunks that are already onchain.
+
+### Compression (opt-in)
+
+`navik deploy --compress`, or the "Compress" checkbox in the dashboard, stores the site gzip-wrapped. The stored document is a small loader page: the original HTML gzipped and base64-encoded, plus a script that decompresses it in the browser (`DecompressionStream`) and swaps it in. The loader keeps `window` intact, so wallet discovery (EIP-6963) and other listeners keep working; it re-runs the page's scripts in order and fires `DOMContentLoaded` and `load`.
+
+| Site | Raw | Compressed |
+|---|---|---|
+| Navik dashboard (JS bundle) | 183 KB, 8 chunks | 77 KB, 4 chunks |
+| Text-heavy page | 114 KB, 5 chunks, ~27M gas | 9 KB, 1 chunk, 2.2M gas |
+
+Trade-offs:
+- **It is off by default:** a compressed site needs JavaScript to render.
+- **Standard formats on purpose:** anyone can audit a release with `base64 -d | gunzip`.
+- **`navik verify` reports both hashes:** the stored loader's hash and the original document's hash. `--out`, `open` and the dashboard's "View" return the original; `--raw` returns the stored bytes.
 
 ## Limits (MVP)
 
