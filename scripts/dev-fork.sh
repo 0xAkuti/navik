@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Local mainnet fork with Navik deployed: anvil on :8545 (chain id 31337).
-# navik.eth is registered to anvil account #0 by impersonating ENSv2's ETHRegistrar,
-# with the same roles a real purchase grants, then Deploy.s.sol attaches it (not frozen).
+# navik.eth goes to anvil account #0: registered by impersonating ENSv2's ETHRegistrar (same
+# roles as a real purchase) or, if it is already owned on mainnet, transferred on the fork by
+# impersonating its owner. Then Deploy.s.sol attaches it (not frozen).
 # FREEZE=1 also runs Freeze.s.sol, removing the power to repoint navik.eth.
 set -euo pipefail
 
@@ -28,14 +29,28 @@ for i in 0 1 2 3; do
   cast rpc anvil_setCode "$(cast wallet address --mnemonic "test test test test test test test test test test test junk" --mnemonic-index $i)" 0x --rpc-url "$RPC" >/dev/null
 done
 
-cast rpc anvil_impersonateAccount "$ETH_REGISTRAR" --rpc-url "$RPC" >/dev/null
-cast rpc anvil_setBalance "$ETH_REGISTRAR" 0xde0b6b3a7640000 --rpc-url "$RPC" >/dev/null
-EXPIRY=$(( $(date +%s) + 10 * 365 * 86400 ))
-cast send "$ETH_REGISTRY" "register(string,address,address,address,uint256,uint64)" \
-  "$ROOT_LABEL" "$OWNER" 0x0000000000000000000000000000000000000000 0x0000000000000000000000000000000000000000 \
-  "$ETH_OWNER_ROLES" "$EXPIRY" --from "$ETH_REGISTRAR" --unlocked --rpc-url "$RPC" >/dev/null
-cast rpc anvil_stopImpersonatingAccount "$ETH_REGISTRAR" --rpc-url "$RPC" >/dev/null
-echo "registered $ROOT_LABEL.eth to $OWNER"
+LABEL_ID=$(cast keccak "$ROOT_LABEL")
+CURRENT=$(cast call "$ETH_REGISTRY" "getOwner(uint256)(address)" "$LABEL_ID" --rpc-url "$RPC")
+if [[ "$CURRENT" == "0x0000000000000000000000000000000000000000" ]]; then
+  # not registered on mainnet yet: register it as ETHRegistrar would after a purchase
+  cast rpc anvil_impersonateAccount "$ETH_REGISTRAR" --rpc-url "$RPC" >/dev/null
+  cast rpc anvil_setBalance "$ETH_REGISTRAR" 0xde0b6b3a7640000 --rpc-url "$RPC" >/dev/null
+  EXPIRY=$(( $(date +%s) + 10 * 365 * 86400 ))
+  cast send "$ETH_REGISTRY" "register(string,address,address,address,uint256,uint64)" \
+    "$ROOT_LABEL" "$OWNER" 0x0000000000000000000000000000000000000000 0x0000000000000000000000000000000000000000 \
+    "$ETH_OWNER_ROLES" "$EXPIRY" --from "$ETH_REGISTRAR" --unlocked --rpc-url "$RPC" >/dev/null
+  cast rpc anvil_stopImpersonatingAccount "$ETH_REGISTRAR" --rpc-url "$RPC" >/dev/null
+elif [[ "$(cast to-check-sum-address "$CURRENT")" != "$OWNER" ]]; then
+  # already owned on mainnet: on the fork only, have the real owner transfer it (roles move with it)
+  TOKEN_ID=$(cast call "$ETH_REGISTRY" "getTokenId(uint256)(uint256)" "$LABEL_ID" --rpc-url "$RPC" | awk '{print $1}')
+  cast rpc anvil_impersonateAccount "$CURRENT" --rpc-url "$RPC" >/dev/null
+  cast rpc anvil_setBalance "$CURRENT" 0xde0b6b3a7640000 --rpc-url "$RPC" >/dev/null
+  cast send "$ETH_REGISTRY" "safeTransferFrom(address,address,uint256,uint256,bytes)" \
+    "$CURRENT" "$OWNER" "$TOKEN_ID" 1 0x --from "$CURRENT" --unlocked --rpc-url "$RPC" >/dev/null
+  cast rpc anvil_stopImpersonatingAccount "$CURRENT" --rpc-url "$RPC" >/dev/null
+  echo "(fork only) moved $ROOT_LABEL.eth from its mainnet owner $CURRENT"
+fi
+echo "$ROOT_LABEL.eth owned by $OWNER on the fork"
 
 cd "$ROOT_DIR/contracts"
 ROOT_LABEL="$ROOT_LABEL" forge script script/Deploy.s.sol --rpc-url "$RPC" --private-key "$OWNER_KEY" --broadcast --slow -q
