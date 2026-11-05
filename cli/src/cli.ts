@@ -50,9 +50,14 @@ program
   .option('--owner <address>', 'owner of the new name (default: your account)')
   .action(async (project: string, opts: { owner?: string }) => {
     const c = await ctx()
-    const { name, resolver, hash } = await navik.claim(c, project, opts.owner ? addr(opts.owner) : undefined)
+    const { name, resolver, releaseRegistry, hash } = await navik.claim(
+      c,
+      project,
+      opts.owner ? addr(opts.owner) : undefined,
+    )
     console.log(`claimed ${name}`)
-    console.log(`  resolver ${resolver}`)
+    console.log(`  resolver ${resolver} (production)`)
+    console.log(`  releases ${releaseRegistry} (registry for <N>.${name} and preview.${name})`)
     console.log(`  tx       ${hash}`)
   })
 
@@ -150,14 +155,16 @@ program
   .action(async (project: string) => {
     const c = await ctx()
     const owner = await navik.projectOwner(c, project)
-    const { releases, live } = await navik.listReleases(c, project)
+    const { releases, live, preview } = await navik.listReleases(c, project)
+    const is = (a: Address | undefined, b: Address) => !!a && getAddress(a) === getAddress(b)
     console.log(`${navik.projectName(c, project)}  owner ${owner}`)
     if (releases.length === 0) console.log('  no releases yet')
     for (const r of releases) {
-      const mark = live && getAddress(live) === getAddress(r.deployment) ? '● live' : '      '
+      const mark = is(live, r.deployment) ? '● live' : '      '
       const chunks = `${r.chunks} chunk${r.chunks === 1 ? '' : 's'}`
+      const tag = is(preview, r.deployment) ? `  ← ${navik.previewName(c, project)}` : ''
       console.log(
-        `  ${mark}  ${r.name.padEnd(36)} ${r.deployment}  ${r.size} B  ${chunks}  ${r.contentHash.slice(0, 10)}…`,
+        `  ${mark}  ${r.name.padEnd(36)} ${r.deployment}  ${r.size} B  ${chunks}  ${r.contentHash.slice(0, 10)}…${tag}`,
       )
     }
     if (live && !releases.some((r) => getAddress(r.deployment) === getAddress(live))) {
@@ -171,7 +178,7 @@ program
   .argument('<name>')
   .action(async (name: string) => {
     const c = await ctx()
-    const fqdn = name.includes('.') ? name : `${name}.${c.deployment.root}`
+    const fqdn = navik.fullName(c, name)
     const d = await navik.resolveContentContract(c, fqdn)
     console.log(d ? `${fqdn} → ${d}` : `${fqdn} → (none)`)
   })
@@ -179,7 +186,7 @@ program
 program
   .command('verify')
   .description('resolve a name, check it is a genuine release and that html() matches its content hash')
-  .argument('<name>', 'portfolio, portfolio-v2, portfolio.navik.eth or any ENS name')
+  .argument('<name>', 'portfolio, 2.portfolio, preview.portfolio, portfolio.navik.eth or any ENS name')
   .option('--out <file>', 'write the verified HTML to a file (the original document if gzip-wrapped)')
   .option('--raw', 'with --out: write the exact stored bytes, even if gzip-wrapped')
   .action(async (name: string, opts: { out?: string; raw?: boolean }) => {
