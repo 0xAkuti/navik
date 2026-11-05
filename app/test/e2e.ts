@@ -57,8 +57,28 @@ const WALLET_METHODS = new Set(['eth_requestAccounts', 'eth_accounts', 'eth_chai
 const WORKER_BUNDLE = 'https://raw.githubusercontent.com/privacy-ethereum/anon-rpc/'
 const siteFrame = (page: Page) => page.frameLocator('iframe.site-frame')
 
-const production = (page: Page) => page.locator('.card', { hasText: 'Production' }).locator('.live:not(.small), p.muted:not(.live)')
-const releaseRow = (page: Page, v: number) => page.locator('tr', { hasText: `${v}.${project}.navik.eth` })
+const production = (page: Page) => page.locator('.prod-live')
+const releaseRow = (page: Page, v: number) => page.locator('.release', { hasText: `${v}.${project}.navik.eth` })
+const modal = (page: Page) => page.locator('.modal')
+
+async function connect(page: Page) {
+  await page.getByRole('button', { name: 'Connect', exact: true }).click()
+  await modal(page).getByRole('button', { name: 'Navik Test Wallet' }).click()
+  await page.getByRole('heading', { name: 'Projects' }).waitFor()
+}
+
+/** Opens the deploy dialog, picks a build, waits for the plan; `options` runs before picking. */
+async function pickBuild(page: Page, v: number, options?: () => Promise<void>) {
+  await page.getByRole('button', { name: 'Deploy', exact: true }).click()
+  await options?.()
+  await modal(page).locator('input[type=file]').setInputFiles({ name: 'index.html', mimeType: 'text/html', buffer: site(v) })
+  await modal(page).getByText(`${v}.${project}.navik.eth`).waitFor()
+}
+
+async function finishDeploy(page: Page, button: 'Deploy' | 'Deploy and promote') {
+  await modal(page).getByRole('button', { name: button, exact: true }).click()
+  await modal(page).getByRole('button', { name: 'Done' }).click()
+}
 
 const browser = await chromium.launch()
 const page = await browser.newPage()
@@ -73,32 +93,34 @@ await page.addInitScript(injectWallet, { rpc: RPC, account: ALICE })
 try {
   await step('load the single-file app and connect the wallet', async () => {
     await page.goto(APP)
-    await page.getByRole('button', { name: 'Connect Navik Test Wallet' }).click()
-    await page.getByText('Your projects').waitFor()
+    await page.screenshot({ path: `${SHOTS}-0-landing.png`, fullPage: true })
+    await connect(page)
     await page.screenshot({ path: `${SHOTS}-1-connected.png` })
   })
 
   await step(`claim ${project}.navik.eth`, async () => {
-    await page.getByPlaceholder('my-site').fill(project)
-    await page.getByRole('button', { name: 'Claim' }).click()
+    await page.getByRole('link', { name: 'New project' }).first().click()
+    await page.getByLabel('Project name').fill(project)
+    await page.getByText('Available').waitFor()
+    await page.screenshot({ path: `${SHOTS}-1b-claim.png` })
+    await page.getByRole('button', { name: `Claim ${project}.navik.eth` }).click()
     await page.getByRole('heading', { name: `${project}.navik.eth` }).waitFor()
-    await page.getByText('owner', { exact: true }).waitFor()
+    await page.getByText('Owner', { exact: true }).waitFor()
   })
 
   await step('deploy v1 and promote it', async () => {
-    await page.locator('input[type=file]').setInputFiles({ name: 'index.html', mimeType: 'text/html', buffer: site(1) })
-    await page.getByText(`1.${project}.navik.eth`).first().waitFor()
-    await page.getByRole('button', { name: 'Deploy and promote' }).click()
-    await page.getByText('Promoted to').waitFor()
+    await pickBuild(page, 1)
+    await page.screenshot({ path: `${SHOTS}-1c-deploy.png` })
+    await finishDeploy(page, 'Deploy and promote')
     await production(page).filter({ hasText: `1.${project}.navik.eth` }).waitFor()
   })
 
   await step('deploy v2 without promoting, then promote it', async () => {
-    await page.locator('input[type=file]').setInputFiles({ name: 'index.html', mimeType: 'text/html', buffer: site(2) })
-    await page.getByRole('button', { name: 'Deploy', exact: true }).click()
+    await pickBuild(page, 2)
+    await finishDeploy(page, 'Deploy')
     await releaseRow(page, 2).waitFor()
     await production(page).filter({ hasText: `1.${project}.navik.eth` }).waitFor()
-    await page.getByText(`preview.${project}.navik.eth`).waitFor() // preview follows the newest release
+    await page.getByText(`preview.${project}.navik.eth`).first().waitFor() // preview follows the newest release
     await releaseRow(page, 2).getByRole('button', { name: 'Promote' }).click()
     await production(page).filter({ hasText: `2.${project}.navik.eth` }).waitFor()
   })
@@ -111,18 +133,17 @@ try {
 
   await step('view v2: fetched from Ethereum, hash-checked, rendered sandboxed', async () => {
     await releaseRow(page, 2).getByRole('link', { name: 'View' }).click()
-    await page.getByText('a release created by the Navik factory').waitFor()
-    await page.getByText('matches the release manifest').waitFor()
+    await page.getByText('A Navik release').waitFor()
+    await page.getByText('Content hash matches the release manifest').waitFor()
     await siteFrame(page).getByText('hello from v2').waitFor()
     await page.screenshot({ path: `${SHOTS}-3-viewer.png`, fullPage: true })
     await page.goBack()
   })
 
   await step('deploy v3 compressed, view it decompressed', async () => {
-    await page.getByLabel(/Compress \(gzip\)/).check()
-    await page.locator('input[type=file]').setInputFiles({ name: 'index.html', mimeType: 'text/html', buffer: site(3) })
-    await page.getByText('compressed from').waitFor()
-    await page.getByRole('button', { name: 'Deploy', exact: true }).click()
+    await pickBuild(page, 3, () => modal(page).getByLabel(/Compress \(gzip\)/).check())
+    await modal(page).getByText('compressed from').waitFor()
+    await finishDeploy(page, 'Deploy')
     await releaseRow(page, 3).waitFor()
     await releaseRow(page, 3).getByRole('link', { name: 'View' }).click()
     await page.getByText('gzip-wrapped: decompressed').waitFor()
@@ -131,12 +152,14 @@ try {
   })
 
   await step('grant a deploy key, then revoke it', async () => {
+    await page.locator('.tabs').getByRole('link', { name: 'Access' }).click()
     await page.getByPlaceholder('0x… key address').fill(CI)
     await page.getByRole('button', { name: 'Grant' }).click()
-    const row = page.locator('tr', { hasText: CI })
+    const row = page.locator('.key-row', { hasText: CI })
     await row.waitFor()
     await row.getByRole('button', { name: 'Revoke deploy' }).click()
     await page.getByText('No keys granted.').waitFor()
+    await page.locator('.tabs').getByRole('link', { name: 'Releases' }).click()
   })
 
   await step('take production offline', async () => {
@@ -153,14 +176,16 @@ try {
     const summary = await page.locator('.meter p').first().innerText()
     assert.match(summary, /^[1-9]\d* via anon-rpc .* · 0 direct /, summary)
     await page.screenshot({ path: `${SHOTS}-4-privacy.png` })
-    await page.getByRole('button', { name: 'Close' }).click()
+    await page.locator('.drawer').getByRole('button', { name: 'Close' }).click()
   })
 
   await step('the project is listed for its owner after a reload', async () => {
     await page.goto(`${APP}#/`)
     await page.reload()
-    await page.getByRole('button', { name: 'Connect Navik Test Wallet' }).click()
-    await page.locator('.sidebar nav a', { hasText: project }).waitFor()
+    await connect(page)
+    const card = page.locator('.project-card', { hasText: project })
+    await card.getByText('release', { exact: false }).waitFor()
+    await page.screenshot({ path: `${SHOTS}-5-projects.png` })
   })
 
   await step('no requests left the page except to the RPC and the pinned worker code', async () => {
@@ -171,6 +196,7 @@ try {
     const viewer = await browser.newPage()
     await viewer.goto(`${APP}#/open/1.${project}.navik.eth`)
     await siteFrame(viewer).getByText('hello from v1').waitFor()
+    await viewer.screenshot({ path: `${SHOTS}-6-viewer-no-wallet.png` })
     await viewer.locator('.compare input[type=file]').setInputFiles({ name: 'index.html', mimeType: 'text/html', buffer: site(1) })
     await viewer.getByText('index.html is byte-identical to the release').waitFor()
     await viewer.locator('.compare input[type=file]').setInputFiles({ name: 'other.html', mimeType: 'text/html', buffer: site(9) })
