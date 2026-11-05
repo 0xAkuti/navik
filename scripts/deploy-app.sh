@@ -11,4 +11,4 @@ DEPLOYMENT="${NAVIK_DEPLOYMENT:-$ROOT_DIR/contracts/deployments/$CHAIN_ID.json}"
 PROJECT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["rootProject"])' "$DEPLOYMENT")
 
 (cd "$ROOT_DIR/app" && NAVIK_CHAINS="$CHAIN_ID" pnpm -s exec vite build --logLevel warn)
-node "$ROOT_DIR/cli/src/cli.ts" deploy "$PROJECT" "$ROOT_DIR/app/dist/index.html" --promote "$@"
+node "$ROOT_DIR/cli/src/cli.ts" deploy "$PROJECT" "$ROOT_DIR/app/dist/index.html" --compress --promote "$@"
