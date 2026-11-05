@@ -11,7 +11,7 @@ address      0x7469…c9Be (known before upload)
 promoted     portfolio.navik.eth → portfolio-v3.navik.eth
 ```
 
-- **Every release is an immutable ERC-8244 contract.** `html()` returns the site, stored in contract bytecode on Ethereum.
+- **Every release is an immutable ERC-8244 contract.** `html()` returns the site, stored in contract bytecode on Ethereum in chunks of up to 24,575 bytes. Sites can be up to about 1.5 MB; unchanged chunks are never uploaded twice.
 - **Every release gets a permanent name:** `<project>-v<N>.navik.eth`. Nobody can change or remove it, including us.
 - **Production is `<project>.navik.eth`.** It is one `contentcontract` text record on the project's own ENSv2 Permissioned Resolver, so promote, rollback and demote are each one ENS write.
 - **Who may deploy is an ENSv2 permission.** The project owner grants a key "publish releases" and/or "change production", for that project only, and can revoke it at any time.
@@ -31,8 +31,8 @@ navik.eth                              resolver: NavikResolver (wildcard, immuta
 | Contract | Role |
 |---|---|
 | `NavikRegistrar` | Creates the Navik UserRegistry and hands out `<project>.navik.eth`. Each project gets its own Permissioned Resolver with the creator as the only role holder |
-| `NavikFactory` | `publish(project, html)` in one transaction: stores the bytes (deduplicated) and deploys release `vN` at `CREATE3(keccak(project, N))` |
-| `Deployment` | One release. ERC-8244 `html()`, plus `manifest()` (project, version, content hash). A clone with immutable args: no storage, no owner |
+| `NavikFactory` | `storeChunks(chunks)` stores content chunks. It is permissionless and addressed by content, so identical chunks are stored once across all projects. `publish(project, pointers)` deploys release `vN` at `CREATE3(keccak(project, N))`, computing the content hash onchain. `publishContent` does both in one transaction for small sites |
+| `Deployment` | One release. ERC-8244 `html()` concatenates its chunks. `chunkCount()` and `chunk(i)` serve RPCs that limit `eth_call` size. `manifest()` returns project, version, content hash, size and chunk pointers. A clone with immutable args: no storage, no owner |
 | `NavikResolver` | Resolver of navik.eth. Answers `contentcontract`, `addr`, `navik.version`, `navik.project` and `navik.contenthash` for `<project>-v<N>.navik.eth`. Unknown versions never resolve |
 
 ## ENSv2 features used
@@ -110,7 +110,7 @@ node src/cli.ts ls portfolio
 node src/cli.ts verify portfolio
 node src/cli.ts open portfolio-v2.navik.eth
 
-# full CLI flow (claim → deploy → grants → rollback → revoke → isolation → demote)
+# full CLI flow (claim → deploy → grants → rollback → multi-chunk → revoke → isolation → demote)
 pnpm run e2e
 ```
 
@@ -138,9 +138,18 @@ pnpm run e2e
    CONFIRM_FREEZE=navik.eth forge script script/Freeze.s.sol --rpc-url $MAINNET_RPC_URL --private-key $OWNER_KEY --broadcast
    ```
 
-Measured on a mainnet fork: publishing a full 24,575-byte site costs about 5.57M gas. Republishing identical bytes costs about 155k gas, because the content is stored once.
+Measured on a mainnet fork:
+
+| Operation | Gas |
+|---|---|
+| Store one full chunk (24,575 B) | ~5.4M |
+| Store + publish a site of up to 2 full chunks (one tx, `publishContent`) | 11.8M for 49,150 B |
+| Publish already-stored chunks | ~210–275k |
+| Read `html()` of a 491 KB site (`eth_call`) | 2.85M |
+
+Mainnet caps a transaction at 2^24 gas (EIP-7825), so the CLI uploads at most 2 chunks per transaction. An upload interrupted halfway resumes: re-running `deploy` skips chunks that are already onchain.
 
 ## Limits (MVP)
 
-- **One chunk per site:** at most 24,575 bytes of prebuilt HTML.
+- **Single-file sites:** one prebuilt HTML document of up to 64 chunks (1,572,800 bytes).
 - **No viewer:** browsers that support ERC-8244 `contentcontract`, or `navik open`, render the sites.
