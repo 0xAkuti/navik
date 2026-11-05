@@ -34,6 +34,7 @@ import {
   textResolverAbi,
   universalResolverAbi,
 } from './abi.ts'
+import { unwrapCompressed, wrapCompressed } from './compress.ts'
 import { type Ctx, requireWallet } from './types.ts'
 import { dnsEncode, isValidProjectLabel, parseContentContract, parseReleaseLabel, textResource } from './names.ts'
 
@@ -168,7 +169,10 @@ export type Verification = {
   contentHash: Hex
   computedHash: Hex
   hashMatches: boolean
+  /** Exact stored bytes (what `html()` returns). */
   html: Uint8Array
+  /** For gzip-wrapped releases: the original document and its hash. */
+  original?: { html: Uint8Array; hash: Hex }
 }
 
 /** Name → contentcontract → factory check → html() → keccak256 == manifest contentHash. */
@@ -203,6 +207,8 @@ export async function verifyDeployment(
     hashMatches: true,
     html,
   }
+  const original = await unwrapCompressed(html).catch(() => undefined)
+  if (original) result.original = { html: original, hash: keccak256(original) }
   if (!isNavikDeployment) return result
 
   const [node, version, contentHash] = await read<Manifest>(ctx, deployment, deploymentAbi, 'manifest')
@@ -264,15 +270,25 @@ export type PublishPlan = {
   predicted: Address
   name: string
   maxSize: number
+  /** Set when the site is stored gzip-wrapped (see compress.ts). */
+  compressed?: { originalSize: number; originalChunks: number }
 }
 
-export async function planPublish(ctx: Ctx, project: string, bytes: Uint8Array): Promise<PublishPlan> {
+export type PlanOptions = { compress?: boolean }
+
+export async function planPublish(
+  ctx: Ctx,
+  project: string,
+  input: Uint8Array,
+  opts: PlanOptions = {},
+): Promise<PublishPlan> {
   const f = ctx.deployment.factory
   const [chunkSize, maxChunks] = (
     await Promise.all([read<bigint>(ctx, f, factoryAbi, 'CHUNK_SIZE'), read<bigint>(ctx, f, factoryAbi, 'MAX_CHUNKS')])
   ).map(Number)
   const maxSize = chunkSize * maxChunks
-  if (bytes.length === 0) throw new Error('empty site')
+  if (input.length === 0) throw new Error('empty site')
+  const bytes = opts.compress ? await wrapCompressed(input) : input
   if (bytes.length > maxSize) throw new Error(`site is ${bytes.length} bytes; the limit is ${maxSize}`)
 
   const chunks: PlannedChunk[] = []
@@ -302,6 +318,9 @@ export async function planPublish(ctx: Ctx, project: string, bytes: Uint8Array):
     predicted,
     name: releaseName(ctx, project, version),
     maxSize,
+    compressed: opts.compress
+      ? { originalSize: input.length, originalChunks: Math.ceil(input.length / chunkSize) }
+      : undefined,
   }
 }
 
