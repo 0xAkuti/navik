@@ -39,7 +39,7 @@ navik.eth                              resolver: NavikResolver (wildcard, immuta
 
 | ENSv2 feature | What it does in Navik | Change it → what users see |
 |---|---|---|
-| Hierarchical registries (navik.eth → Navik UserRegistry) | Our namespace of projects | Locked: nobody can swap it |
+| Hierarchical registries (navik.eth → Navik UserRegistry) | Our namespace of projects | Swappable by the navik.eth owner until frozen, then by nobody |
 | Tokenized subnames (ERC-1155) owned by users | Who owns a project | Owner transfers → new wallet controls it |
 | Registry walk with resolver fallback (ENSIP-10) | Permanent release names with zero writes | Cannot change; unknown versions do not resolve |
 | One Permissioned Resolver per project, deployed via VerifiableFactory | What is live: `text("contentcontract")` | Set it → site changes; set an older release → rollback |
@@ -61,12 +61,17 @@ navik.eth                              resolver: NavikResolver (wildcard, immuta
 - No backend, accounts or analytics.
 - The CLI talks only to the RPC you choose.
 
-**Security.** What each party can and cannot do:
+**Security.** Navik has two phases:
+
+1. **Testing.** The navik.eth owner keeps the ENSv2 roles to repoint navik.eth's registry and resolver, so a broken deployment can be replaced. That power covers the whole namespace: repointing navik.eth hides every project and release name served by the old contracts. The releases themselves, their bytes and their addresses are untouched.
+2. **Frozen.** `Freeze.s.sol` revokes those roles, including the admin roles that could grant them back, from every holder. Then it checks onchain that nobody holds them. This is irreversible. `navik info` reports which phase a deployment is in, read from the chain.
+
+What each party can and cannot do:
 
 | Party | Can | Cannot |
 |---|---|---|
-| Navik team (navik.eth owner) | Renew navik.eth (anyone can) | Repoint navik.eth's registry or resolver: the roles are revoked at deploy (`attachAndLock`) |
-| | | Unregister, take or repoint a project; publish to it; change production; alter a release |
+| Navik team (navik.eth owner) | Renew navik.eth (anyone can) | Unregister, take or repoint a project; publish to it; change production; alter a release |
+| | Before the freeze only: repoint navik.eth to other Navik contracts | After the freeze: repoint navik.eth at all |
 | Navik contracts | — | Hold any role on project names or project resolvers |
 | Project creator | Publish releases; promote, roll back, demote; grant and revoke keys; transfer the name | Change or delete a published release, or its name |
 | Key granted `publish` | Publish releases of that project | Change production; touch other projects |
@@ -91,7 +96,7 @@ Requirements: Node ≥ 22.18, pnpm, Foundry.
 # contracts + fork tests against real mainnet ENSv2
 cd contracts && forge test
 
-# local mainnet fork with navik.eth registered, Navik deployed and the root locked
+# local mainnet fork with navik.eth registered and Navik deployed (FREEZE=1 to also freeze it)
 ./scripts/dev-fork.sh
 
 # CLI
@@ -119,7 +124,19 @@ pnpm run e2e
    forge script script/Deploy.s.sol --rpc-url $MAINNET_RPC_URL --private-key $OWNER_KEY --broadcast --verify
    ```
 
-   This deploys the contracts, points navik.eth at them, and permanently drops the owner's power to repoint it. It also writes `contracts/deployments/1.json`, which the CLI reads.
+   This deploys the contracts and points navik.eth at them. It writes `contracts/deployments/1.json`, which the CLI reads, plus `1-<block>.json` as a record.
+
+3. During testing, fix mistakes by deploying again (step 2), or switch back to an earlier deployment:
+
+   ```bash
+   DEPLOYMENT=1-<block> forge script script/Attach.s.sol --rpc-url $MAINNET_RPC_URL --private-key $OWNER_KEY --broadcast
+   ```
+
+4. When ready, freeze navik.eth. This is irreversible. If other wallets were granted roles on navik.eth, list them in `ALSO_REVOKE` (comma-separated); the script fails if anyone would keep the power.
+
+   ```bash
+   CONFIRM_FREEZE=navik.eth forge script script/Freeze.s.sol --rpc-url $MAINNET_RPC_URL --private-key $OWNER_KEY --broadcast
+   ```
 
 Measured on a mainnet fork: publishing a full 24,575-byte site costs about 5.57M gas. Republishing identical bytes costs about 155k gas, because the content is stored once.
 
