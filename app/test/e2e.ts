@@ -18,8 +18,10 @@ const site = (v: number) => Buffer.from(`<!doctype html><title>${project}</title
 
 function injectWallet({ rpc, account }: { rpc: string; account: string }) {
   let id = 0
+  const seen: string[] = ((window as unknown as { walletMethods: string[] }).walletMethods = [])
   const provider = {
     async request({ method, params }: { method: string; params?: unknown[] }) {
+      seen.push(method)
       if (method === 'eth_requestAccounts' || method === 'eth_accounts') return [account]
       if (method === 'wallet_switchEthereumChain') return null
       const res = await fetch(rpc, {
@@ -49,6 +51,12 @@ async function step(name: string, fn: () => Promise<void>) {
   console.log('ok')
 }
 
+// the only requests the app may send to the wallet: no reads, so the wallet's RPC learns nothing
+const WALLET_METHODS = new Set(['eth_requestAccounts', 'eth_accounts', 'eth_chainId', 'eth_sendTransaction', 'wallet_switchEthereumChain'])
+// the passthrough anon-rpc worker's code, keccak-pinned in the app
+const WORKER_BUNDLE = 'https://raw.githubusercontent.com/privacy-ethereum/anon-rpc/'
+const siteFrame = (page: Page) => page.frameLocator('iframe.site-frame')
+
 const production = (page: Page) => page.locator('.card', { hasText: 'Production' }).locator('.live:not(.small), p.muted:not(.live)')
 const releaseRow = (page: Page, v: number) => page.locator('tr', { hasText: `${v}.${project}.navik.eth` })
 
@@ -57,7 +65,7 @@ const page = await browser.newPage()
 const external: string[] = []
 page.on('request', (r) => {
   const url = r.url()
-  if (!/^(file:|data:|blob:)/.test(url) && !url.startsWith(RPC)) external.push(url)
+  if (!/^(file:|data:|blob:|about:)/.test(url) && !url.startsWith(RPC) && !url.startsWith(WORKER_BUNDLE)) external.push(url)
 })
 page.on('pageerror', (e) => console.error('page error:', e.message))
 await page.addInitScript(injectWallet, { rpc: RPC, account: ALICE })
@@ -101,13 +109,13 @@ try {
     await page.screenshot({ path: `${SHOTS}-2-project.png`, fullPage: true })
   })
 
-  await step('view v2: fetched from Ethereum and hash-checked', async () => {
-    const [popup] = await Promise.all([
-      page.waitForEvent('popup'),
-      releaseRow(page, 2).getByRole('button', { name: 'View' }).click(),
-    ])
-    await popup.getByText('hello from v2').waitFor()
-    await popup.close()
+  await step('view v2: fetched from Ethereum, hash-checked, rendered sandboxed', async () => {
+    await releaseRow(page, 2).getByRole('link', { name: 'View' }).click()
+    await page.getByText('a release created by the Navik factory').waitFor()
+    await page.getByText('matches the release manifest').waitFor()
+    await siteFrame(page).getByText('hello from v2').waitFor()
+    await page.screenshot({ path: `${SHOTS}-3-viewer.png`, fullPage: true })
+    await page.goBack()
   })
 
   await step('deploy v3 compressed, view it decompressed', async () => {
@@ -116,12 +124,10 @@ try {
     await page.getByText('compressed from').waitFor()
     await page.getByRole('button', { name: 'Deploy', exact: true }).click()
     await releaseRow(page, 3).waitFor()
-    const [popup] = await Promise.all([
-      page.waitForEvent('popup'),
-      releaseRow(page, 3).getByRole('button', { name: 'View' }).click(),
-    ])
-    await popup.getByText('hello from v3').waitFor()
-    await popup.close()
+    await releaseRow(page, 3).getByRole('link', { name: 'View' }).click()
+    await page.getByText('gzip-wrapped: decompressed').waitFor()
+    await siteFrame(page).getByText('hello from v3').waitFor()
+    await page.goBack()
   })
 
   await step('grant a deploy key, then revoke it', async () => {
@@ -138,6 +144,18 @@ try {
     await page.getByText('Nothing is live').waitFor()
   })
 
+  await step('every read went through the anon-rpc worker; the wallet only signed', async () => {
+    const methods: string[] = await page.evaluate(() => (window as unknown as { walletMethods: string[] }).walletMethods)
+    assert.ok(methods.includes('eth_sendTransaction'))
+    assert.deepEqual([...new Set(methods)].filter((m) => !WALLET_METHODS.has(m)), [])
+    await page.locator('button.pill').click()
+    await page.getByText(/% of \d+ calls through anon-rpc/).waitFor()
+    const summary = await page.locator('.meter p').first().innerText()
+    assert.match(summary, /^[1-9]\d* via anon-rpc .* · 0 direct /, summary)
+    await page.screenshot({ path: `${SHOTS}-4-privacy.png` })
+    await page.getByRole('button', { name: 'Close' }).click()
+  })
+
   await step('the project is listed for its owner after a reload', async () => {
     await page.goto(`${APP}#/`)
     await page.reload()
@@ -145,8 +163,33 @@ try {
     await page.locator('.sidebar nav a', { hasText: project }).waitFor()
   })
 
-  await step('no requests left the page except to the wallet RPC', async () => {
+  await step('no requests left the page except to the RPC and the pinned worker code', async () => {
     assert.deepEqual(external, [])
+  })
+
+  await step('open a site with no wallet, and compare it with a local build', async () => {
+    const viewer = await browser.newPage()
+    await viewer.goto(`${APP}#/open/1.${project}.navik.eth`)
+    await siteFrame(viewer).getByText('hello from v1').waitFor()
+    await viewer.locator('.compare input[type=file]').setInputFiles({ name: 'index.html', mimeType: 'text/html', buffer: site(1) })
+    await viewer.getByText('index.html is byte-identical to the release').waitFor()
+    await viewer.locator('.compare input[type=file]').setInputFiles({ name: 'other.html', mimeType: 'text/html', buffer: site(9) })
+    await viewer.getByText('other.html differs').waitFor()
+    // an unknown name fails cleanly
+    await viewer.getByLabel('Name to open').fill(`9.${project}.navik.eth`)
+    await viewer.getByRole('button', { name: 'Open', exact: true }).click()
+    await viewer.getByText('has no contentcontract record').waitFor()
+    await viewer.close()
+  })
+
+  await step('switch reads to Direct: the panel shows them as direct', async () => {
+    await page.locator('button.pill').click()
+    await page.getByLabel(/^Direct/).check()
+    await page.getByRole('button', { name: 'Apply' }).click()
+    await page.locator('button.pill', { hasText: 'Direct reads' }).waitFor()
+    await page.goto(`${APP}#/open/1.${project}.navik.eth`)
+    await siteFrame(page).getByText('hello from v1').waitFor()
+    await page.locator('.meter p', { hasText: /· [1-9]\d* direct/ }).waitFor() // the drawer is still open
   })
   console.log(`\nall app e2e checks passed (screenshots: ${SHOTS}-*.png)`)
 } catch (err) {
