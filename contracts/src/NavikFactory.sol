@@ -7,9 +7,16 @@ import {SSTORE2} from "solady/utils/SSTORE2.sol";
 
 import {Deployment} from "./Deployment.sol";
 import {ENSv2Roles, IPermissionedRegistry, IPermissionedResolver} from "./interfaces/IENSv2.sol";
+import {NavikChunks} from "./libraries/NavikChunks.sol";
 import {NavikNames} from "./libraries/NavikNames.sol";
 
 /// Publishes immutable releases for projects under navik.eth.
+///
+/// Content is stored as chunks of up to 24,575 bytes (SSTORE2 data contracts, addressed by
+/// content, so identical chunks are stored once across all projects). Large sites upload chunks
+/// with `storeChunks` over several transactions (mainnet caps a transaction at 2^24 gas, about
+/// two full chunks), then `publish` the list of pointers. Small sites can do both at once with
+/// `publishContent`. The content hash is computed onchain over the concatenated chunks.
 ///
 /// No owner, no upgrades. Versions are append-only: version N of a project lives at
 /// CREATE3(this, keccak(projectNode, N)) and a CREATE3 salt can never be reused.
@@ -22,6 +29,7 @@ contract NavikFactory {
     error ProjectNotClaimed(string label);
     error NotPublisher(string label, address account);
     error InvalidContent();
+    error InvalidChunk(uint256 index);
 
     event DeploymentPublished(
         bytes32 indexed projectNode,
@@ -29,15 +37,18 @@ contract NavikFactory {
         address indexed deployment,
         string label,
         bytes32 contentHash,
-        address pointer,
+        uint32 size,
+        uint16 chunkCount,
         address publisher
     );
+    event ChunkStored(address indexed pointer, uint256 size);
 
     /// EAC resource for the publish capability: keccak256("navik.publish").
     string public constant PUBLISH_KEY = "navik.publish";
     uint256 public constant PUBLISH_RESOURCE = uint256(keccak256(bytes(PUBLISH_KEY)));
-    /// SSTORE2 data contracts are capped by EIP-170 (24,576 bytes minus the STOP prefix).
-    uint256 public constant MAX_SIZE = 24_575;
+    uint256 public constant CHUNK_SIZE = NavikChunks.CHUNK_SIZE;
+    /// Keeps `html()` comfortably inside default `eth_call` gas caps (~1.5 MiB).
+    uint256 public constant MAX_CHUNKS = 64;
 
     IPermissionedRegistry public immutable REGISTRY;
     bytes32 public immutable ROOT_NODE;
@@ -51,21 +62,42 @@ contract NavikFactory {
         IMPLEMENTATION = address(new Deployment());
     }
 
-    function publish(string calldata label, bytes calldata html) external returns (address deployment, uint64 version) {
-        if (html.length == 0 || html.length > MAX_SIZE) revert InvalidContent();
+    /// Stores chunks that are not stored yet. Permissionless: chunks are addressed by content.
+    function storeChunks(bytes[] calldata chunks) public returns (address[] memory pointers) {
+        pointers = new address[](chunks.length);
+        for (uint256 i; i < chunks.length; ++i) {
+            bytes calldata c = chunks[i];
+            if (c.length == 0 || c.length > CHUNK_SIZE) revert InvalidChunk(i);
+            address p = SSTORE2.predictCounterfactualAddress(c, bytes32(0));
+            if (p.code.length == 0) {
+                SSTORE2.writeCounterfactual(c, bytes32(0));
+                emit ChunkStored(p, c.length);
+            }
+            pointers[i] = p;
+        }
+    }
+
+    /// Where `chunk` is (or would be) stored.
+    function chunkPointer(bytes calldata chunk) external view returns (address) {
+        return SSTORE2.predictCounterfactualAddress(chunk, bytes32(0));
+    }
+
+    /// Publishes the next version of `label` from already stored chunks, in document order.
+    function publish(string calldata label, address[] calldata pointers)
+        external
+        returns (address deployment, uint64 version)
+    {
         _checkPublisher(label, msg.sender);
+        return _publish(label, pointers);
+    }
 
-        // content is shared across projects and versions: identical bytes are stored once
-        address pointer = SSTORE2.predictCounterfactualAddress(html, bytes32(0));
-        if (pointer.code.length == 0) SSTORE2.writeCounterfactual(html, bytes32(0));
-
-        bytes32 node = projectNode(label);
-        version = ++versionCount[node];
-        bytes32 contentHash = keccak256(html);
-        bytes memory args = abi.encodePacked(node, version, contentHash, pointer, uint32(html.length));
-        deployment = CREATE3.deployDeterministic(LibClone.initCode(IMPLEMENTATION, args), _salt(node, version));
-
-        emit DeploymentPublished(node, version, deployment, label, contentHash, pointer, msg.sender);
+    /// Stores `chunks` (skipping existing ones) and publishes them in one transaction.
+    function publishContent(string calldata label, bytes[] calldata chunks)
+        external
+        returns (address deployment, uint64 version)
+    {
+        _checkPublisher(label, msg.sender);
+        return _publish(label, storeChunks(chunks));
     }
 
     function canPublish(string calldata label, address account) public view returns (bool) {
@@ -102,10 +134,46 @@ contract NavikFactory {
     /// anyone can clone the implementation with forged args, but not at our CREATE3 address.
     function isNavikDeployment(address deployment) external view returns (bool) {
         if (deployment.code.length == 0) return false;
-        try Deployment(deployment).manifest() returns (bytes32 node, uint64 version, bytes32, address, uint32) {
-            return deployment == deploymentOf(node, version);
+        try Deployment(deployment).projectNode() returns (bytes32 node) {
+            try Deployment(deployment).version() returns (uint64 version) {
+                return deployment == deploymentOf(node, version);
+            } catch {
+                return false;
+            }
         } catch {
             return false;
+        }
+    }
+
+    function _publish(string calldata label, address[] memory pointers)
+        internal
+        returns (address deployment, uint64 version)
+    {
+        uint256 n = pointers.length;
+        if (n == 0 || n > MAX_CHUNKS) revert InvalidContent();
+        bytes memory content = NavikChunks.read(pointers); // reverts on missing chunks
+        bytes32 contentHash = keccak256(content);
+        // forge-lint: disable-next-line(unsafe-typecast) bounded by MAX_CHUNKS * CHUNK_SIZE
+        uint32 size = uint32(content.length);
+
+        bytes32 node = projectNode(label);
+        version = ++versionCount[node];
+        // forge-lint: disable-next-line(unsafe-typecast) bounded by MAX_CHUNKS
+        bytes memory args = abi.encodePacked(node, version, contentHash, size, uint16(n), _pack(pointers));
+        deployment = CREATE3.deployDeterministic(LibClone.initCode(IMPLEMENTATION, args), _salt(node, version));
+
+        // forge-lint: disable-next-line(unsafe-typecast) bounded by MAX_CHUNKS
+        emit DeploymentPublished(node, version, deployment, label, contentHash, size, uint16(n), msg.sender);
+    }
+
+    /// Tightly packs addresses (abi.encodePacked pads array elements to 32 bytes).
+    function _pack(address[] memory pointers) internal pure returns (bytes memory out) {
+        out = new bytes(pointers.length * 20);
+        for (uint256 i; i < pointers.length; ++i) {
+            address p = pointers[i];
+            assembly ("memory-safe") {
+                mstore(add(add(out, 0x20), mul(i, 20)), shl(96, p))
+            }
         }
     }
 
