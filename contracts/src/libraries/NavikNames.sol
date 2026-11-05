@@ -33,11 +33,7 @@ library NavikNames {
     }
 
     /// Splits `<project>-v<N>` at the last hyphen. Does not validate the project part.
-    function parseVersionLabel(bytes memory b)
-        internal
-        pure
-        returns (bool ok, string memory project, uint64 version)
-    {
+    function parseVersionLabel(bytes memory b) internal pure returns (bool ok, string memory project, uint64 version) {
         uint256 n = b.length;
         uint256 dash = type(uint256).max;
         for (uint256 i = n; i > 0; --i) {
@@ -67,11 +63,7 @@ library NavikNames {
     }
 
     /// Reads the DNS-encoded label at `offset`. Returns the label and the next offset.
-    function readLabel(bytes memory name, uint256 offset)
-        internal
-        pure
-        returns (bytes memory label, uint256 next)
-    {
+    function readLabel(bytes memory name, uint256 offset) internal pure returns (bytes memory label, uint256 next) {
         if (offset >= name.length) revert InvalidName();
         uint256 len = uint8(name[offset]);
         next = offset + 1 + len;
