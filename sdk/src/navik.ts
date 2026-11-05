@@ -171,6 +171,21 @@ export async function listReleases(
   return { releases, live, preview }
 }
 
+export type ProjectSummary = { releases: number; live?: Address; liveVersion?: bigint }
+
+/** What a project overview card shows: release count and what production serves. */
+export async function projectSummary(ctx: Ctx, project: string): Promise<ProjectSummary> {
+  const node = await projectNode(ctx, project)
+  const [count, live] = await Promise.all([
+    read<bigint>(ctx, ctx.deployment.factory, factoryAbi, 'versionCount', [node]),
+    resolveContentContract(ctx, projectName(ctx, project)),
+  ])
+  const liveVersion = live
+    ? await read<Manifest>(ctx, live, deploymentAbi, 'manifest').then((m) => m[1], () => undefined)
+    : undefined
+  return { releases: Number(count), live, liveVersion }
+}
+
 export type Verification = {
   name: string
   deployment: Address
