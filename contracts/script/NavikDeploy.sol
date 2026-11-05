@@ -26,7 +26,11 @@ library NavikDeploy {
         | ENSv2Roles.ROLE_SET_SUBREGISTRY_ADMIN | ENSv2Roles.ROLE_SET_RESOLVER | ENSv2Roles.ROLE_SET_RESOLVER_ADMIN;
 
     /// Deploys the Navik contracts for `<rootLabel>.eth`. Needs no special permissions.
-    function deploy(string memory rootLabel) internal returns (Navik memory n) {
+    /// `rootProject` (claimed for `rootProjectOwner`) is the project navik.eth itself serves.
+    function deploy(string memory rootLabel, string memory rootProject, address rootProjectOwner)
+        internal
+        returns (Navik memory n)
+    {
         n.rootNode = NavikNames.node(ETH_NODE, rootLabel);
         n.registrar = new NavikRegistrar(
             IVerifiableFactory(ENSv2Mainnet.VERIFIABLE_FACTORY),
@@ -34,11 +38,13 @@ library NavikDeploy {
             ENSv2Mainnet.PERMISSIONED_RESOLVER_IMPL,
             ENSv2Mainnet.ETH_REGISTRY,
             rootLabel,
-            n.rootNode
+            n.rootNode,
+            rootProject,
+            rootProjectOwner
         );
         n.registry = n.registrar.REGISTRY();
         n.factory = new NavikFactory(n.registry, n.rootNode);
-        n.resolver = new NavikResolver(n.factory);
+        n.resolver = new NavikResolver(n.factory, rootProject);
     }
 
     /// Must be sent by an account holding the root control roles (the navik.eth owner):

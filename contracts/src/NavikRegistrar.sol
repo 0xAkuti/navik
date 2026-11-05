@@ -20,6 +20,9 @@ import {NavikNames} from "./libraries/NavikNames.sol";
 ///
 /// Every project gets its own Permissioned Resolver (one EAC scope per project) where the
 /// claimer is the only role holder. The registrar keeps nothing.
+///
+/// The root project (e.g. `app`), whose production navik.eth itself follows, is claimed in the
+/// constructor so nobody can front-run it.
 contract NavikRegistrar {
     error InvalidLabel(string label);
     error LabelTaken(string label);
@@ -44,7 +47,9 @@ contract NavikRegistrar {
         address resolverImpl,
         address parentRegistry,
         string memory rootLabel,
-        bytes32 rootNode
+        bytes32 rootNode,
+        string memory rootProject,
+        address rootProjectOwner
     ) {
         VERIFIABLE_FACTORY = verifiableFactory;
         RESOLVER_IMPL = resolverImpl;
@@ -59,19 +64,28 @@ contract NavikRegistrar {
         );
         registry.setParent(parentRegistry, rootLabel);
         REGISTRY = registry;
+        _claim(registry, rootNode, rootProject, rootProjectOwner);
     }
 
     function claim(string calldata label, address owner) external returns (address resolver, uint256 tokenId) {
+        return _claim(REGISTRY, ROOT_NODE, label, owner);
+    }
+
+    /// Takes the registry and root node as arguments: immutables cannot be read in the constructor.
+    function _claim(IPermissionedRegistry registry, bytes32 rootNode, string memory label, address owner)
+        internal
+        returns (address resolver, uint256 tokenId)
+    {
         if (!NavikNames.isValidProjectLabel(label)) revert InvalidLabel(label);
-        if (REGISTRY.getOwner(uint256(keccak256(bytes(label)))) != address(0)) revert LabelTaken(label);
-        bytes32 node = NavikNames.node(ROOT_NODE, label);
+        if (registry.getOwner(uint256(keccak256(bytes(label)))) != address(0)) revert LabelTaken(label);
+        bytes32 node = NavikNames.node(rootNode, label);
 
         Grant[] memory grants = new Grant[](1);
         grants[0] = Grant(owner, ENSv2Roles.ALL_ROLES);
         resolver = VERIFIABLE_FACTORY.deployProxy(
             RESOLVER_IMPL, uint256(node), abi.encodeCall(IPermissionedResolver.initialize, (grants, new bytes[](0)))
         );
-        tokenId = REGISTRY.register(label, owner, address(0), resolver, OWNER_ROLES, EXPIRY);
+        tokenId = registry.register(label, owner, address(0), resolver, OWNER_ROLES, EXPIRY);
 
         emit ProjectClaimed(node, label, owner, resolver, tokenId);
     }

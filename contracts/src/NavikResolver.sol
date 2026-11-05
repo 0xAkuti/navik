@@ -4,7 +4,7 @@ pragma solidity ^0.8.25;
 import {LibString} from "solady/utils/LibString.sol";
 
 import {Deployment} from "./Deployment.sol";
-import {IExtendedResolver} from "./interfaces/IENSv2.sol";
+import {IExtendedResolver, IPermissionedRegistry} from "./interfaces/IENSv2.sol";
 import {NavikNames} from "./libraries/NavikNames.sol";
 import {NavikFactory} from "./NavikFactory.sol";
 
@@ -14,6 +14,10 @@ import {NavikFactory} from "./NavikFactory.sol";
 /// registry fall back to navik.eth's resolver (ENSIP-10 wildcard). Answers are computed
 /// from the factory, so release names need no writes, cannot be changed by anyone, and
 /// unknown versions never resolve. No owner, no upgrades.
+///
+/// navik.eth itself is an alias of the root project (e.g. `app.navik.eth`): every query for the
+/// root name is forwarded to that project's resolver, so navik.eth serves its production and
+/// follows its promotions and rollbacks like any other project.
 contract NavikResolver is IExtendedResolver {
     error UnknownName(bytes name);
     error UnsupportedResolverProfile(bytes4 selector);
@@ -25,11 +29,16 @@ contract NavikResolver is IExtendedResolver {
     uint256 private constant COIN_TYPE_ETH = 60;
 
     NavikFactory public immutable FACTORY;
+    IPermissionedRegistry public immutable REGISTRY;
     bytes32 public immutable ROOT_NODE;
+    /// Project whose records navik.eth serves. Set once, no setter.
+    string public rootProject;
 
-    constructor(NavikFactory factory) {
+    constructor(NavikFactory factory, string memory rootProject_) {
         FACTORY = factory;
+        REGISTRY = factory.REGISTRY();
         ROOT_NODE = factory.ROOT_NODE();
+        rootProject = rootProject_;
     }
 
     function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
@@ -48,6 +57,7 @@ contract NavikResolver is IExtendedResolver {
             }
             return abi.encode(calls);
         }
+        if (NavikNames.namehash(name, 0) == ROOT_NODE) return _forwardRoot(name, data);
         (string memory project, uint64 version, address deployment) = release(name);
         return _answer(data, project, version, deployment);
     }
@@ -65,6 +75,14 @@ contract NavikResolver is IExtendedResolver {
         if (!ok) revert UnknownName(name);
         deployment = FACTORY.deploymentOf(NavikNames.node(ROOT_NODE, project), version);
         if (deployment == address(0)) revert UnknownName(name);
+    }
+
+    /// Answers for navik.eth from the root project's own resolver (any record, any profile).
+    function _forwardRoot(bytes calldata name, bytes calldata data) internal view returns (bytes memory) {
+        string memory project = rootProject;
+        address resolver = REGISTRY.getResolver(project);
+        if (resolver == address(0)) revert UnknownName(name);
+        return IExtendedResolver(resolver).resolve(NavikNames.dnsEncode(project, name), data);
     }
 
     function _answer(bytes calldata data, string memory project, uint64 version, address deployment)

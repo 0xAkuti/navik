@@ -32,6 +32,7 @@ interface IAddrResolver {
 abstract contract NavikForkBase is Test {
     uint256 internal constant FORK_BLOCK = 26_349_600;
     string internal constant ROOT = "navik";
+    string internal constant ROOT_PROJECT = "app";
     bytes internal constant ROOT_DNS = hex"056e6176696b0365746800"; // navik.eth
 
     IPermissionedRegistry internal eth = IPermissionedRegistry(ENSv2Mainnet.ETH_REGISTRY);
@@ -54,7 +55,7 @@ abstract contract NavikForkBase is Test {
         );
 
         vm.prank(deployer);
-        n = NavikDeploy.deploy(ROOT);
+        n = NavikDeploy.deploy(ROOT, ROOT_PROJECT, rootOwner);
 
         vm.startPrank(rootOwner);
         NavikDeploy.attach(n, ROOT);
@@ -409,6 +410,34 @@ contract NavikForkTest is NavikForkBase {
         assertEq(_text("portfolio-v2", "contentcontract"), _hex(d2));
     }
 
+    function _rootText(string memory key) internal view returns (string memory) {
+        (bytes memory result,) =
+            ur.resolve(ROOT_DNS, abi.encodeCall(ITextResolver.text, (NavikNames.namehash(ROOT_DNS, 0), key)));
+        return abi.decode(result, (string));
+    }
+
+    function test_root_servesRootProject() public {
+        // claimed for the team at deploy time; nobody can take it first
+        assertEq(n.registry.getOwner(uint256(keccak256("app"))), rootOwner);
+        vm.expectRevert(abi.encodeWithSelector(NavikRegistrar.LabelTaken.selector, "app"));
+        n.registrar.claim("app", mallory);
+
+        assertEq(_rootText("contentcontract"), "", "nothing live yet");
+        (address d1,) = _publish(rootOwner, "app", SITE_V1);
+        (address d2,) = _publish(rootOwner, "app", SITE_V2);
+        _promote(rootOwner, "app", d1);
+        assertEq(_rootText("contentcontract"), _hex(d1));
+        _promote(rootOwner, "app", d2);
+        assertEq(_rootText("contentcontract"), _hex(d2), "navik.eth follows app's production");
+        assertEq(_text("app-v1", "contentcontract"), _hex(d1), "releases stay addressable");
+
+        // other records of the root project come through too
+        IPermissionedResolver appResolver = IPermissionedResolver(n.registry.getResolver("app"));
+        vm.prank(rootOwner);
+        appResolver.setText(_dns("app"), "description", "Navik");
+        assertEq(_rootText("description"), "Navik");
+    }
+
     function test_demote() public {
         IPermissionedResolver r = _claim("portfolio", alice);
         (address d1,) = _publish(alice, "portfolio", SITE_V1);
@@ -516,7 +545,7 @@ contract NavikForkTest is NavikForkBase {
 
         // testing phase: the owner can switch navik.eth to fixed contracts...
         vm.startPrank(rootOwner);
-        Navik memory fixed_ = NavikDeploy.deploy(ROOT);
+        Navik memory fixed_ = NavikDeploy.deploy(ROOT, ROOT_PROJECT, rootOwner);
         NavikDeploy.attach(fixed_, ROOT);
         vm.stopPrank();
         assertEq(eth.getResolver(ROOT), address(fixed_.resolver));

@@ -11,18 +11,21 @@ import {Navik, NavikDeploy} from "./NavikDeploy.sol";
 /// Deploys Navik on mainnet (or a mainnet fork) and writes deployments/<chainId>.json
 /// (plus deployments/<chainId>-<block>.json, kept for switching back).
 ///
-/// If the broadcaster owns `<ROOT_LABEL>.eth`, it also points the name at the new contracts.
+/// The broadcaster gets the root project (ROOT_PROJECT, default `app`), whose production
+/// navik.eth itself serves. If the broadcaster owns `<ROOT_LABEL>.eth`, it also points the
+/// name at the new contracts.
 /// The owner keeps the power to repoint it (to fix mistakes) until Freeze.s.sol is run.
 ///
 ///   ROOT_LABEL=navik forge script script/Deploy.s.sol --rpc-url $RPC_URL --private-key $PRIVATE_KEY --broadcast
 contract Deploy is Script {
     function run() external {
         string memory rootLabel = vm.envOr("ROOT_LABEL", string("navik"));
+        string memory rootProject = vm.envOr("ROOT_PROJECT", string("app"));
         IPermissionedRegistry eth = IPermissionedRegistry(ENSv2Mainnet.ETH_REGISTRY);
 
         vm.startBroadcast();
         (, address sender,) = vm.readCallers();
-        Navik memory n = NavikDeploy.deploy(rootLabel);
+        Navik memory n = NavikDeploy.deploy(rootLabel, rootProject, sender);
         bool owner = eth.getOwner(uint256(keccak256(bytes(rootLabel)))) == sender;
         if (owner) NavikDeploy.attach(n, rootLabel);
         vm.stopBroadcast();
@@ -30,15 +33,16 @@ contract Deploy is Script {
         if (!owner) {
             console.log("broadcaster does not own the root name: run Attach.s.sol from the owner wallet");
         }
-        _write(n, rootLabel);
+        _write(n, rootLabel, rootProject);
     }
 
-    function _write(Navik memory n, string memory rootLabel) internal {
+    function _write(Navik memory n, string memory rootLabel, string memory rootProject) internal {
         string memory k = "deployment";
         vm.serializeUint(k, "chainId", block.chainid);
         vm.serializeUint(k, "deployBlock", block.number);
         vm.serializeString(k, "root", string.concat(rootLabel, ".eth"));
         vm.serializeBytes32(k, "rootNode", n.rootNode);
+        vm.serializeString(k, "rootProject", rootProject);
         vm.serializeAddress(k, "registrar", address(n.registrar));
         vm.serializeAddress(k, "registry", address(n.registry));
         vm.serializeAddress(k, "factory", address(n.factory));
