@@ -49,8 +49,8 @@ async function step(name: string, fn: () => Promise<void>) {
   console.log('ok')
 }
 
-const production = (page: Page) => page.locator('.card', { hasText: 'Production' }).locator('.live, p.muted')
-const releaseRow = (page: Page, v: number) => page.locator('tr', { hasText: `${project}-v${v}.navik.eth` })
+const production = (page: Page) => page.locator('.card', { hasText: 'Production' }).locator('.live:not(.small), p.muted:not(.live)')
+const releaseRow = (page: Page, v: number) => page.locator('tr', { hasText: `${v}.${project}.navik.eth` })
 
 const browser = await chromium.launch()
 const page = await browser.newPage()
@@ -79,24 +79,25 @@ try {
 
   await step('deploy v1 and promote it', async () => {
     await page.locator('input[type=file]').setInputFiles({ name: 'index.html', mimeType: 'text/html', buffer: site(1) })
-    await page.getByText(`${project}-v1.navik.eth`).first().waitFor()
+    await page.getByText(`1.${project}.navik.eth`).first().waitFor()
     await page.getByRole('button', { name: 'Deploy and promote' }).click()
     await page.getByText('Promoted to').waitFor()
-    await production(page).filter({ hasText: `${project}-v1.navik.eth` }).waitFor()
+    await production(page).filter({ hasText: `1.${project}.navik.eth` }).waitFor()
   })
 
   await step('deploy v2 without promoting, then promote it', async () => {
     await page.locator('input[type=file]').setInputFiles({ name: 'index.html', mimeType: 'text/html', buffer: site(2) })
     await page.getByRole('button', { name: 'Deploy', exact: true }).click()
     await releaseRow(page, 2).waitFor()
-    await production(page).filter({ hasText: `${project}-v1.navik.eth` }).waitFor()
+    await production(page).filter({ hasText: `1.${project}.navik.eth` }).waitFor()
+    await page.getByText(`preview.${project}.navik.eth`).waitFor() // preview follows the newest release
     await releaseRow(page, 2).getByRole('button', { name: 'Promote' }).click()
-    await production(page).filter({ hasText: `${project}-v2.navik.eth` }).waitFor()
+    await production(page).filter({ hasText: `2.${project}.navik.eth` }).waitFor()
   })
 
   await step('roll back to v1', async () => {
     await releaseRow(page, 1).getByRole('button', { name: 'Roll back' }).click()
-    await production(page).filter({ hasText: `${project}-v1.navik.eth` }).waitFor()
+    await production(page).filter({ hasText: `1.${project}.navik.eth` }).waitFor()
     await page.screenshot({ path: `${SHOTS}-2-project.png`, fullPage: true })
   })
 

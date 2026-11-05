@@ -45,7 +45,7 @@ as "$ALICE" claim "$PROJECT"
 
 step "deploy v1 and promote"
 as "$ALICE" deploy "$PROJECT" "$WORK/v1.html" --promote
-V1=$(navik resolve "$PROJECT-v1" | awk '{print $3}')
+V1=$(navik resolve "1.$PROJECT" | awk '{print $3}')
 live_is "$V1"
 
 step "grant the CI key publish-only"
@@ -53,7 +53,9 @@ as "$ALICE" grant "$PROJECT" "$CI_ADDR" --permission publish
 
 step "CI ships v2 but cannot touch production"
 as "$CI" deploy "$PROJECT" "$WORK/v2.html"
-V2=$(navik resolve "$PROJECT-v2" | awk '{print $3}')
+V2=$(navik resolve "2.$PROJECT" | awk '{print $3}')
+[[ "$(navik resolve "preview.$PROJECT")" == *"$V2"* ]] || { echo "preview did not follow v2" >&2; exit 1; }
+echo "  preview.$PROJECT.navik.eth follows the newest release"
 fails as "$CI" promote "$PROJECT" v2
 live_is "$V1"
 
@@ -71,14 +73,14 @@ navik ls "$PROJECT"
 
 step "verify production and a release name"
 navik verify "$PROJECT"
-navik verify "$PROJECT-v2.navik.eth" --out "$WORK/fetched.html"
+navik verify "2.$PROJECT.navik.eth" --out "$WORK/fetched.html"
 cmp "$WORK/fetched.html" "$WORK/v2.html" && echo "  fetched bytes == uploaded bytes"
 
 step "multi-chunk: a ~70 KB site is uploaded in batches, then published"
 { printf '<!doctype html><title>%s</title><pre>' "$PROJECT"; head -c 52000 /dev/urandom | base64 -w 120; printf '</pre>'; } > "$WORK/big.html"
 as "$ALICE" deploy "$PROJECT" "$WORK/big.html" | tee "$WORK/out"
 grep -q "chunks       3 (0 already stored, 3 new)" "$WORK/out"
-navik verify "$PROJECT-v3" --out "$WORK/big-fetched.html"
+navik verify "3.$PROJECT" --out "$WORK/big-fetched.html"
 cmp "$WORK/big-fetched.html" "$WORK/big.html" && echo "  fetched bytes == uploaded bytes ($(wc -c < "$WORK/big.html") B)"
 
 step "multi-chunk: changing the end of the site re-uploads only the last chunk"
@@ -93,10 +95,10 @@ step "compressed: a ~100 KB site stored gzip-wrapped in fewer chunks"
 { printf '<!doctype html><title>%s</title><ol>' "$PROJECT"; for i in $(seq 1 2500); do printf '<li>row %d of a fairly repetitive table</li>' "$i"; done; printf '</ol>'; } > "$WORK/zip.html"
 as "$ALICE" deploy "$PROJECT" "$WORK/zip.html" --compress | tee "$WORK/out"
 grep -Eq "compressed   [0-9]+ → [0-9]+ bytes \([0-9]+ → 1 chunks\)" "$WORK/out"
-navik verify "$PROJECT-v5" --out "$WORK/zip-fetched.html" | tee "$WORK/out"
+navik verify "5.$PROJECT" --out "$WORK/zip-fetched.html" | tee "$WORK/out"
 grep -q "gzip-wrapped: original" "$WORK/out"
 cmp "$WORK/zip-fetched.html" "$WORK/zip.html" && echo "  decompressed bytes == original bytes ($(wc -c < "$WORK/zip.html") B)"
-navik verify "$PROJECT-v5" --raw --out "$WORK/zip-raw.html" >/dev/null
+navik verify "5.$PROJECT" --raw --out "$WORK/zip-raw.html" >/dev/null
 base64 -d <<<"$(grep -o 'atob("[^"]*")' "$WORK/zip-raw.html" | sed 's/atob("//; s/")$//')" | gunzip | cmp - "$WORK/zip.html" \
   && echo "  stored loader decodes with standard tools: base64 -d | gunzip"
 
@@ -122,9 +124,11 @@ fails as "$MALLORY" promote "$PROJECT" v2
 step "demote: production cleared, releases stay"
 as "$ALICE" demote "$PROJECT"
 live_is "(none)"
-navik verify "$PROJECT-v1"
+navik verify "1.$PROJECT"
 
-step "release-shaped labels cannot be claimed"
-fails as "$MALLORY" claim "$PROJECT-v9"
+step "release names are subnames of the project, not claimable labels"
+fails as "$MALLORY" claim "9.$PROJECT"
+navik resolve "9.$PROJECT" | grep -q "(none)" || { echo "9.$PROJECT should not resolve" >&2; exit 1; }
+echo "  9.$PROJECT.navik.eth does not exist yet"
 
 printf '\n\033[32mall e2e checks passed\033[0m\n'
