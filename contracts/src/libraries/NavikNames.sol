@@ -3,15 +3,12 @@ pragma solidity ^0.8.25;
 
 /// Label rules and DNS-name helpers shared by the registrar and resolver.
 ///
-/// Project labels: 3-63 chars of [a-z0-9-], no leading, trailing or double hyphen,
-/// and never shaped like a version name.
-/// Version labels: `<project>-v<N>` with N >= 1 in decimal, no leading zeros.
+/// Project labels: 3-63 chars of [a-z0-9-], no leading, trailing or double hyphen.
 library NavikNames {
     error InvalidName();
 
     uint256 internal constant MIN_LABEL = 3;
     uint256 internal constant MAX_LABEL = 63;
-    uint256 internal constant MAX_VERSION_DIGITS = 19; // fits uint64
 
     function node(bytes32 parent, string memory label) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(parent, keccak256(bytes(label))));
@@ -28,38 +25,7 @@ library NavikNames {
             if (!ok) return false;
             if (c == "-" && b[i + 1] == "-") return false; // safe: last char is not "-"
         }
-        (bool isVersion,,) = parseVersionLabel(b);
-        return !isVersion;
-    }
-
-    /// Splits `<project>-v<N>` at the last hyphen. Does not validate the project part.
-    function parseVersionLabel(bytes memory b) internal pure returns (bool ok, string memory project, uint64 version) {
-        uint256 n = b.length;
-        uint256 dash = type(uint256).max;
-        for (uint256 i = n; i > 0; --i) {
-            if (b[i - 1] == "-") {
-                dash = i - 1;
-                break;
-            }
-        }
-        // need at least "x-v1"
-        if (dash == type(uint256).max || dash == 0 || n < dash + 3 || b[dash + 1] != "v") {
-            return (false, "", 0);
-        }
-        uint256 digits = n - dash - 2;
-        if (digits > MAX_VERSION_DIGITS || b[dash + 2] == "0") return (false, "", 0);
-        uint256 v;
-        for (uint256 i = dash + 2; i < n; ++i) {
-            bytes1 c = b[i];
-            if (c < "0" || c > "9") return (false, "", 0);
-            v = v * 10 + uint8(c) - 48;
-        }
-        if (v > type(uint64).max) return (false, "", 0);
-        bytes memory p = new bytes(dash);
-        for (uint256 i; i < dash; ++i) {
-            p[i] = b[i];
-        }
-        return (true, string(p), uint64(v));
+        return true;
     }
 
     /// Reads the DNS-encoded label at `offset`. Returns the label and the next offset.

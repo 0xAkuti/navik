@@ -13,7 +13,7 @@ contract NavikNamesTest is Test {
         assertTrue(NavikNames.isValidProjectLabel("v2site"));
         assertTrue(NavikNames.isValidProjectLabel("site-v"));
         assertTrue(NavikNames.isValidProjectLabel("site-vx1"));
-        assertTrue(NavikNames.isValidProjectLabel("site-v01")); // not a canonical version label
+        assertTrue(NavikNames.isValidProjectLabel("site-v1")); // releases live under the project, not beside it
     }
 
     function test_invalidProjectLabels() public pure {
@@ -23,41 +23,7 @@ contract NavikNamesTest is Test {
         assertFalse(NavikNames.isValidProjectLabel("a--b"));
         assertFalse(NavikNames.isValidProjectLabel("Upper"));
         assertFalse(NavikNames.isValidProjectLabel("dot.ted"));
-        assertFalse(NavikNames.isValidProjectLabel("site-v1")); // reserved for releases
-        assertFalse(NavikNames.isValidProjectLabel("my-site-v42"));
         assertFalse(NavikNames.isValidProjectLabel(string(new bytes(64))));
-    }
-
-    function test_parseVersionLabel() public pure {
-        (bool ok, string memory project, uint64 version) = NavikNames.parseVersionLabel("portfolio-v3");
-        assertTrue(ok);
-        assertEq(project, "portfolio");
-        assertEq(version, 3);
-
-        (ok, project, version) = NavikNames.parseVersionLabel("my-site-v120");
-        assertTrue(ok);
-        assertEq(project, "my-site");
-        assertEq(version, 120);
-    }
-
-    function test_parseVersionLabel_rejects() public pure {
-        bool ok;
-        (ok,,) = NavikNames.parseVersionLabel("portfolio");
-        assertFalse(ok);
-        (ok,,) = NavikNames.parseVersionLabel("portfolio-v0");
-        assertFalse(ok);
-        (ok,,) = NavikNames.parseVersionLabel("portfolio-v01");
-        assertFalse(ok);
-        (ok,,) = NavikNames.parseVersionLabel("portfolio-v");
-        assertFalse(ok);
-        (ok,,) = NavikNames.parseVersionLabel("portfolio-V1");
-        assertFalse(ok);
-        (ok,,) = NavikNames.parseVersionLabel("-v1");
-        assertFalse(ok);
-        (ok,,) = NavikNames.parseVersionLabel("portfolio-v1x");
-        assertFalse(ok);
-        (ok,,) = NavikNames.parseVersionLabel("portfolio-v99999999999999999999");
-        assertFalse(ok);
     }
 
     function test_namehash() public pure {

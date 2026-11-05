@@ -64,8 +64,26 @@ abstract contract NavikForkBase is Test {
 
     // ---------------------------------------------------------------- helpers
 
-    function _dns(string memory label) internal pure returns (bytes memory) {
-        return NavikNames.dnsEncode(label, ROOT_DNS);
+    /// DNS-encodes `<name>.navik.eth`; `name` may have several labels ("1.portfolio").
+    function _dns(string memory name) internal pure returns (bytes memory out) {
+        out = ROOT_DNS;
+        bytes memory b = bytes(name);
+        uint256 end = b.length;
+        for (uint256 i = b.length; i > 0; --i) {
+            if (b[i - 1] == ".") {
+                out = NavikNames.dnsEncode(_slice(b, i, end), out);
+                end = i - 1;
+            }
+        }
+        out = NavikNames.dnsEncode(_slice(b, 0, end), out);
+    }
+
+    function _slice(bytes memory b, uint256 from, uint256 to) internal pure returns (string memory) {
+        bytes memory r = new bytes(to - from);
+        for (uint256 i; i < r.length; ++i) {
+            r[i] = b[from + i];
+        }
+        return string(r);
     }
 
     function _node(string memory label) internal view returns (bytes32) {
@@ -73,8 +91,13 @@ abstract contract NavikForkBase is Test {
     }
 
     function _claim(string memory label, address owner) internal returns (IPermissionedResolver) {
-        (address resolver,) = n.registrar.claim(label, owner);
+        (address resolver,,) = n.registrar.claim(label, owner);
         return IPermissionedResolver(resolver);
+    }
+
+    /// The project's own registry, holding `<N>.<project>` and `preview.<project>`.
+    function _releases(string memory label) internal view returns (IPermissionedRegistry) {
+        return IPermissionedRegistry(n.registry.getSubregistry(label));
     }
 
     function _publish(address as_, string memory label, bytes memory html) internal returns (address d, uint64 v) {
@@ -243,8 +266,8 @@ contract NavikForkTest is NavikForkBase {
             assertEq(dep.pointers()[i], pointers[i]);
         }
         assertTrue(n.factory.isNavikDeployment(d));
-        assertEq(_text("portfolio-v1", "contentcontract"), _hex(d));
-        assertEq(_text("portfolio-v1", "navik.contenthash"), LibString.toHexString(uint256(keccak256(site)), 32));
+        assertEq(_text("1.portfolio", "contentcontract"), _hex(d));
+        assertEq(_text("1.portfolio", "navik.contenthash"), LibString.toHexString(uint256(keccak256(site)), 32));
     }
 
     function test_publish_largeSite() public {
@@ -357,8 +380,6 @@ contract NavikForkTest is NavikForkBase {
         vm.expectRevert(abi.encodeWithSelector(NavikRegistrar.LabelTaken.selector, "portfolio"));
         n.registrar.claim("portfolio", mallory);
 
-        vm.expectRevert(abi.encodeWithSelector(NavikRegistrar.InvalidLabel.selector, "portfolio-v1"));
-        n.registrar.claim("portfolio-v1", mallory);
         vm.expectRevert(abi.encodeWithSelector(NavikRegistrar.InvalidLabel.selector, "Portfolio"));
         n.registrar.claim("Portfolio", mallory);
     }
@@ -383,12 +404,12 @@ contract NavikForkTest is NavikForkBase {
         _claim("portfolio", alice);
         (address d1,) = _publish(alice, "portfolio", SITE_V1);
 
-        // release name resolves immediately, with no ENS write
-        assertEq(_text("portfolio-v1", "contentcontract"), _hex(d1));
-        assertEq(_addr("portfolio-v1"), d1);
-        assertEq(_text("portfolio-v1", "navik.version"), "1");
-        assertEq(_text("portfolio-v1", "navik.project"), "portfolio");
-        assertEq(_text("portfolio-v1", "navik.contenthash"), LibString.toHexString(uint256(keccak256(SITE_V1)), 32));
+        // the release name is registered by the publish itself; the release answers for it
+        assertEq(_text("1.portfolio", "contentcontract"), _hex(d1));
+        assertEq(_addr("1.portfolio"), d1);
+        assertEq(_text("1.portfolio", "navik.version"), "1");
+        assertEq(_text("1.portfolio", "navik.contenthash"), LibString.toHexString(uint256(keccak256(SITE_V1)), 32));
+        assertEq(_text("preview.portfolio", "contentcontract"), _hex(d1));
 
         // production is empty until promoted
         assertEq(_text("portfolio", "contentcontract"), "");
@@ -406,8 +427,8 @@ contract NavikForkTest is NavikForkBase {
         _promote(alice, "portfolio", d1); // rollback: one ENS write, no upload
         assertEq(_text("portfolio", "contentcontract"), _hex(d1));
         // both releases keep their names
-        assertEq(_text("portfolio-v1", "contentcontract"), _hex(d1));
-        assertEq(_text("portfolio-v2", "contentcontract"), _hex(d2));
+        assertEq(_text("1.portfolio", "contentcontract"), _hex(d1));
+        assertEq(_text("2.portfolio", "contentcontract"), _hex(d2));
     }
 
     function _rootText(string memory key) internal view returns (string memory) {
@@ -429,7 +450,7 @@ contract NavikForkTest is NavikForkBase {
         assertEq(_rootText("contentcontract"), _hex(d1));
         _promote(rootOwner, "app", d2);
         assertEq(_rootText("contentcontract"), _hex(d2), "navik.eth follows app's production");
-        assertEq(_text("app-v1", "contentcontract"), _hex(d1), "releases stay addressable");
+        assertEq(_text("1.app", "contentcontract"), _hex(d1), "releases stay addressable");
 
         // other records of the root project come through too
         IPermissionedResolver appResolver = IPermissionedResolver(n.registry.getResolver("app"));
@@ -446,17 +467,20 @@ contract NavikForkTest is NavikForkBase {
         vm.prank(alice);
         r.setText(_dns("portfolio"), "contentcontract", "");
         assertEq(_text("portfolio", "contentcontract"), "");
-        assertEq(_text("portfolio-v1", "contentcontract"), _hex(d1), "release stays");
+        assertEq(_text("1.portfolio", "contentcontract"), _hex(d1), "release stays");
     }
 
-    function test_unknownReleasesDoNotResolve() public {
+    function test_unknownNames() public {
         _claim("portfolio", alice);
+        // before the first publish, preview has no resolver and falls back to the project's (empty)
+        assertEq(_text("preview.portfolio", "contentcontract"), "");
         _publish(alice, "portfolio", SITE_V1);
-        _expectUnresolved("portfolio-v2"); // not published yet
-        _expectUnresolved("portfolio-v0");
-        _expectUnresolved("portfolio-v01");
-        _expectUnresolved("nothing-v1"); // unclaimed project
-        _expectUnresolved("random");
+        // unpublished versions fall back to the project's resolver: no release behind them
+        assertEq(_text("2.portfolio", "contentcontract"), "");
+        assertEq(_text("01.portfolio", "contentcontract"), "");
+        // names under unclaimed labels hit navik.eth's resolver and do not resolve
+        _expectUnresolved("nothing");
+        _expectUnresolved("1.nothing");
     }
 
     function _expectUnresolved(string memory label) internal {
@@ -468,13 +492,13 @@ contract NavikForkTest is NavikForkBase {
     function test_multicallThroughUniversalResolver() public {
         _claim("portfolio", alice);
         (address d1,) = _publish(alice, "portfolio", SITE_V1);
-        bytes memory name = _dns("portfolio-v1");
+        bytes memory name = _dns("1.portfolio");
         bytes32 node = NavikNames.namehash(name, 0);
         bytes[] memory calls = new bytes[](2);
         calls[0] = abi.encodeCall(ITextResolver.text, (node, "contentcontract"));
         calls[1] = abi.encodeCall(IAddrResolver.addr, (node));
         bytes[] memory results =
-            abi.decode(n.resolver.resolve(name, abi.encodeWithSignature("multicall(bytes[])", calls)), (bytes[]));
+            abi.decode(Deployment(d1).resolve(name, abi.encodeWithSignature("multicall(bytes[])", calls)), (bytes[]));
         assertEq(abi.decode(results[0], (string)), _hex(d1));
         assertEq(abi.decode(results[1], (address)), d1);
     }
@@ -549,13 +573,13 @@ contract NavikForkTest is NavikForkBase {
         NavikDeploy.attach(fixed_, ROOT);
         vm.stopPrank();
         assertEq(eth.getResolver(ROOT), address(fixed_.resolver));
-        _expectUnresolved("portfolio-v1");
+        _expectUnresolved("1.portfolio");
 
         // ...and back
         vm.startPrank(rootOwner);
         NavikDeploy.attach(n, ROOT);
         vm.stopPrank();
-        assertEq(_text("portfolio-v1", "contentcontract"), _hex(d1));
+        assertEq(_text("1.portfolio", "contentcontract"), _hex(d1));
 
         // nobody else can
         vm.startPrank(mallory);
@@ -585,7 +609,7 @@ contract NavikForkTest is NavikForkBase {
         assertTrue(eth.isEmancipated(), "ETHRegistry has no root override");
 
         // everything keeps working
-        assertEq(_text("portfolio-v1", "contentcontract"), _hex(d1));
+        assertEq(_text("1.portfolio", "contentcontract"), _hex(d1));
         (address d2,) = _publish(alice, "portfolio", SITE_V2);
         _promote(alice, "portfolio", d2);
         assertEq(_text("portfolio", "contentcontract"), _hex(d2));
@@ -621,9 +645,125 @@ contract NavikForkTest is NavikForkBase {
     }
 
     function test_navikRegistry_hasNoAdmin() public view {
-        // the only root roles in the Navik registry: the registrar's REGISTRAR and SET_PARENT
-        assertEq(n.registry.roleCount(0), ENSv2Roles.ROLE_REGISTRAR | ENSv2Roles.ROLE_SET_PARENT);
+        // the only root role in the Navik registry: the registrar's REGISTRAR; the parent is locked
+        assertEq(n.registry.roleCount(0), ENSv2Roles.ROLE_REGISTRAR);
+        assertTrue(n.registry.hasRootRoles(ENSv2Roles.ROLE_REGISTRAR, address(n.registrar)));
         assertTrue(n.registry.isEmancipated());
+        (address parent, string memory label) = n.registry.getParent();
+        assertEq(parent, address(eth));
+        assertEq(label, ROOT);
+    }
+
+    function test_releaseRegistry_hasNoAdmin() public {
+        _claim("portfolio", alice);
+        IPermissionedRegistry releases = _releases("portfolio");
+        // the factory is the only registrar; the registrar kept nothing; the parent is locked
+        assertEq(releases.roleCount(0), ENSv2Roles.ROLE_REGISTRAR);
+        assertTrue(releases.hasRootRoles(ENSv2Roles.ROLE_REGISTRAR, address(n.factory)));
+        assertTrue(releases.isEmancipated());
+        (address parent, string memory label) = releases.getParent();
+        assertEq(parent, address(n.registry));
+        assertEq(label, "portfolio");
+
+        // nobody, including the owner, can swap it out from under the project
+        address[3] memory others = [alice, rootOwner, address(n.registrar)];
+        for (uint256 i; i < others.length; ++i) {
+            vm.prank(others[i]);
+            vm.expectRevert();
+            n.registry.setSubregistry(uint256(keccak256("portfolio")), mallory);
+        }
+        assertEq(n.registry.getSubregistry("portfolio"), address(releases));
+    }
+
+    function test_releaseNames_areForeverTokens() public {
+        _claim("portfolio", alice);
+        (address d1,) = _publish(alice, "portfolio", SITE_V1);
+        IPermissionedRegistry releases = _releases("portfolio");
+        uint256 id = uint256(keccak256("1"));
+
+        assertEq(releases.getOwner(id), address(n.factory), "held by the factory");
+        assertEq(releases.getResolver("1"), d1, "the release is its own resolver");
+        assertEq(releases.getExpiry(id), type(uint64).max, "never expires");
+        assertEq(releases.roles(id, address(n.factory)), 0, "no roles: no resolver change, transfer or unregister");
+
+        address[4] memory everyone = [alice, rootOwner, address(n.registrar), address(n.factory)];
+        for (uint256 i; i < everyone.length; ++i) {
+            vm.startPrank(everyone[i]);
+            vm.expectRevert();
+            releases.setResolver(id, mallory);
+            vm.expectRevert();
+            releases.unregister(id);
+            vm.stopPrank();
+        }
+        // only the factory registers release names, and its code does so only when publishing
+        vm.prank(alice);
+        vm.expectRevert();
+        releases.register("2", alice, address(0), mallory, 0, type(uint64).max);
+    }
+
+    function test_preview_followsLatestPublish() public {
+        _claim("portfolio", alice);
+        _grantPublish(alice, "portfolio", ci);
+        (address d1,) = _publish(alice, "portfolio", SITE_V1);
+        assertEq(_text("preview.portfolio", "contentcontract"), _hex(d1));
+
+        // a publish-only key moves preview with each release, never production
+        (address d2,) = _publish(ci, "portfolio", SITE_V2);
+        assertEq(_text("preview.portfolio", "contentcontract"), _hex(d2));
+        assertEq(_text("portfolio", "contentcontract"), "");
+
+        // promoting an older release does not move preview
+        _promote(alice, "portfolio", d1);
+        assertEq(_text("preview.portfolio", "contentcontract"), _hex(d2));
+
+        // preview is held by the factory, which may only repoint its resolver
+        IPermissionedRegistry releases = _releases("portfolio");
+        uint256 id = uint256(keccak256("preview"));
+        assertEq(releases.getOwner(id), address(n.factory));
+        assertEq(releases.roles(id, address(n.factory)), ENSv2Roles.ROLE_SET_RESOLVER);
+        vm.prank(alice);
+        vm.expectRevert();
+        releases.setResolver(id, mallory);
+    }
+
+    function test_customDomain_sharesProjectNamespace() public {
+        IPermissionedResolver r = _claim("portfolio", alice);
+        (address d1,) = _publish(alice, "portfolio", SITE_V1);
+        (address d2,) = _publish(alice, "portfolio", SITE_V2);
+        _promote(alice, "portfolio", d1);
+
+        // alice's own .eth name (registered as a real purchase would be)
+        string memory label = "navikalicetestdomain";
+        bytes memory dns = NavikNames.dnsEncode(label, hex"0365746800");
+        uint256 id = uint256(keccak256(bytes(label)));
+        vm.prank(ENSv2Mainnet.ETH_REGISTRAR);
+        eth.register(
+            label, alice, address(0), address(0), ENSv2Mainnet.ETH_OWNER_ROLES, uint64(block.timestamp + 365 days)
+        );
+
+        vm.startPrank(alice);
+        eth.setSubregistry(id, address(_releases("portfolio"))); // namespace aliasing: shared registry
+        eth.setResolver(id, address(r));
+        r.linkToNode(dns, _node("portfolio")); // record aliasing: same production record
+        vm.stopPrank();
+
+        assertEq(_textOf(dns, "contentcontract"), _hex(d1), "alice.eth serves production");
+        assertEq(_textOf(_sub("1", dns), "contentcontract"), _hex(d1), "1.alice.eth is release 1");
+        assertEq(_textOf(_sub("2", dns), "contentcontract"), _hex(d2));
+        assertEq(_textOf(_sub("preview", dns), "contentcontract"), _hex(d2));
+
+        // promotions on the project are followed by the custom domain
+        _promote(alice, "portfolio", d2);
+        assertEq(_textOf(dns, "contentcontract"), _hex(d2));
+    }
+
+    function _sub(string memory label, bytes memory parentDns) internal pure returns (bytes memory) {
+        return NavikNames.dnsEncode(label, parentDns);
+    }
+
+    function _textOf(bytes memory dns, string memory key) internal view returns (string memory) {
+        (bytes memory result,) = ur.resolve(dns, abi.encodeCall(ITextResolver.text, (NavikNames.namehash(dns, 0), key)));
+        return abi.decode(result, (string));
     }
 
     function test_projectNames_cannotBeTaken() public {
@@ -640,7 +780,10 @@ contract NavikForkTest is NavikForkBase {
             n.registry.setSubregistry(id, mallory);
             vm.stopPrank();
         }
-        // not even the owner can delete it (so a label can never be re-claimed)
+        // not even the owner can delete it (so a label can never be re-claimed) or swap its releases
+        vm.prank(alice);
+        vm.expectRevert();
+        n.registry.setSubregistry(id, mallory);
         vm.prank(alice);
         vm.expectRevert();
         n.registry.unregister(id);
@@ -657,8 +800,8 @@ contract NavikForkTest is NavikForkBase {
         n.registry.setResolver(uint256(keccak256("portfolio")), address(0));
         assertEq(n.registry.getResolver("portfolio"), address(0));
 
-        // ...but release names are computed from the immutable factory and stay
-        assertEq(_text("portfolio-v1", "contentcontract"), _hex(d1));
+        // ...but release names live in the project's own registry and stay
+        assertEq(_text("1.portfolio", "contentcontract"), _hex(d1));
         assertEq(Deployment(d1).html(), string(SITE_V1));
     }
 

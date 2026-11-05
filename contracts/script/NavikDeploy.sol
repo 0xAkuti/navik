@@ -43,8 +43,8 @@ library NavikDeploy {
             rootProjectOwner
         );
         n.registry = n.registrar.REGISTRY();
-        n.factory = new NavikFactory(n.registry, n.rootNode);
-        n.resolver = new NavikResolver(n.factory, rootProject);
+        n.factory = n.registrar.FACTORY();
+        n.resolver = new NavikResolver(n.registry, n.rootNode, rootProject);
     }
 
     /// Must be sent by an account holding the root control roles (the navik.eth owner):

@@ -33,6 +33,9 @@ interface IPermissionedRegistry is IRegistry {
     function hasRoles(uint256 anyId, uint256 roleBitmap, address account) external view returns (bool);
     function hasRootRoles(uint256 roleBitmap, address account) external view returns (bool);
     function grantRootRoles(uint256 roleBitmap, address account) external returns (bool);
+    function revokeRootRoles(uint256 roleBitmap, address account) external returns (bool);
+    function getParent() external view returns (address parent, string memory label);
+    function getResource(uint256 anyId) external view returns (uint256);
     function grantRoles(uint256 anyId, uint256 roleBitmap, address account) external returns (bool);
     function revokeRoles(uint256 anyId, uint256 roleBitmap, address account) external returns (bool);
     function unregister(uint256 anyId) external;
@@ -68,7 +71,9 @@ interface IExtendedResolver {
 library ENSv2Roles {
     // registry
     uint256 internal constant ROLE_REGISTRAR = 1 << 0;
+    uint256 internal constant ROLE_REGISTRAR_ADMIN = ROLE_REGISTRAR << 128;
     uint256 internal constant ROLE_SET_PARENT = 1 << 8;
+    uint256 internal constant ROLE_SET_PARENT_ADMIN = ROLE_SET_PARENT << 128;
     uint256 internal constant ROLE_UNREGISTER = 1 << 12;
     uint256 internal constant ROLE_RENEW = 1 << 16;
     uint256 internal constant ROLE_SET_SUBREGISTRY = 1 << 20;

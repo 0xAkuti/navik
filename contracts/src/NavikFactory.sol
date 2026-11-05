@@ -3,6 +3,7 @@ pragma solidity ^0.8.25;
 
 import {CREATE3} from "solady/utils/CREATE3.sol";
 import {LibClone} from "solady/utils/LibClone.sol";
+import {LibString} from "solady/utils/LibString.sol";
 import {SSTORE2} from "solady/utils/SSTORE2.sol";
 
 import {Deployment} from "./Deployment.sol";
@@ -21,6 +22,12 @@ import {NavikNames} from "./libraries/NavikNames.sol";
 /// No owner, no upgrades. Versions are append-only: version N of a project lives at
 /// CREATE3(this, keccak(projectNode, N)) and a CREATE3 salt can never be reused.
 ///
+/// Every release also gets a permanent ENSv2 name, `<N>.<project>.navik.eth`, registered in the
+/// project's own registry (created by the registrar, where this factory is the only registrar):
+/// a token held by this factory with no roles and no expiry, whose resolver is the release
+/// itself, so nobody can change, transfer or remove it. `preview.<project>.navik.eth` is
+/// repointed to the newest release on every publish.
+///
 /// Who may publish is decided by ENSv2, not by this contract:
 /// - the owner of `<project>.navik.eth` in the Navik registry, or
 /// - an account the project's Permissioned Resolver allows to set the `navik.publish` text key
@@ -30,6 +37,7 @@ contract NavikFactory {
     error NotPublisher(string label, address account);
     error InvalidContent();
     error InvalidChunk(uint256 index);
+    error NoReleaseRegistry(string label);
 
     event DeploymentPublished(
         bytes32 indexed projectNode,
@@ -49,6 +57,8 @@ contract NavikFactory {
     uint256 public constant CHUNK_SIZE = NavikChunks.CHUNK_SIZE;
     /// Keeps `html()` comfortably inside default `eth_call` gas caps (~1.5 MiB).
     uint256 public constant MAX_CHUNKS = 64;
+    /// Label of the mutable "latest release" name in every project registry.
+    string public constant PREVIEW_LABEL = "preview";
 
     IPermissionedRegistry public immutable REGISTRY;
     bytes32 public immutable ROOT_NODE;
@@ -162,8 +172,36 @@ contract NavikFactory {
         bytes memory args = abi.encodePacked(node, version, contentHash, size, uint16(n), _pack(pointers));
         deployment = CREATE3.deployDeterministic(LibClone.initCode(IMPLEMENTATION, args), _salt(node, version));
 
+        _name(label, version, deployment);
         // forge-lint: disable-next-line(unsafe-typecast) bounded by MAX_CHUNKS
         emit DeploymentPublished(node, version, deployment, label, contentHash, size, uint16(n), msg.sender);
+    }
+
+    /// Registers `<version>.<label>.navik.eth` (forever, no roles, resolver = the release) and
+    /// repoints `preview.<label>.navik.eth` to it.
+    function _name(string calldata label, uint64 version, address deployment) internal {
+        IPermissionedRegistry releases = releaseRegistry(label);
+        releases.register(LibString.toString(version), address(this), address(0), deployment, 0, type(uint64).max);
+        releases.setResolver(uint256(keccak256(bytes(PREVIEW_LABEL))), deployment);
+    }
+
+    /// The project's own registry, holding its release names. Set at claim and locked.
+    function releaseRegistry(string calldata label) public view returns (IPermissionedRegistry registry) {
+        registry = IPermissionedRegistry(REGISTRY.getSubregistry(label));
+        if (address(registry) == address(0)) revert NoReleaseRegistry(label);
+    }
+
+    /// Release and preview name tokens are minted to this contract, which never moves them.
+    function onERC1155Received(address, address, uint256, uint256, bytes calldata) external pure returns (bytes4) {
+        return this.onERC1155Received.selector;
+    }
+
+    function onERC1155BatchReceived(address, address, uint256[] calldata, uint256[] calldata, bytes calldata)
+        external
+        pure
+        returns (bytes4)
+    {
+        return this.onERC1155BatchReceived.selector;
     }
 
     /// Tightly packs addresses (abi.encodePacked pads array elements to 32 bytes).

@@ -2,8 +2,10 @@
 pragma solidity ^0.8.25;
 
 import {LibClone} from "solady/utils/LibClone.sol";
+import {LibString} from "solady/utils/LibString.sol";
 import {SSTORE2} from "solady/utils/SSTORE2.sol";
 
+import {IExtendedResolver} from "./interfaces/IENSv2.sol";
 import {NavikChunks} from "./libraries/NavikChunks.sol";
 
 /// ERC-8244 contract-hosted app: one immutable release of a Navik project.
@@ -13,8 +15,19 @@ import {NavikChunks} from "./libraries/NavikChunks.sol";
 ///   bytes32 projectNode | uint64 version | bytes32 contentHash | uint32 size | uint16 chunkCount
 ///   | address[chunkCount] pointers
 /// The document is the concatenation of the chunks behind `pointers`.
-contract Deployment {
+///
+/// Each release is also the ENS resolver of its own name (`<N>.<project>.navik.eth`): it answers
+/// `contentcontract` and `addr` with its own address, whatever name it is reached through (for
+/// example `<N>.alice.eth` when alice.eth shares the project's registry).
+contract Deployment is IExtendedResolver {
+    error UnsupportedResolverProfile(bytes4 selector);
+
     uint256 internal constant POINTERS_OFFSET = 78;
+    bytes4 private constant ADDR = 0x3b3b57de; // addr(bytes32)
+    bytes4 private constant ADDR_COIN = 0xf1cb7e06; // addr(bytes32,uint256)
+    bytes4 private constant TEXT = 0x59d1d43c; // text(bytes32,string)
+    bytes4 private constant MULTICALL = 0xac9650d8; // multicall(bytes[])
+    uint256 private constant COIN_TYPE_ETH = 60;
 
     address public immutable factory;
 
@@ -72,5 +85,48 @@ contract Deployment {
 
     function size() public view returns (uint32) {
         return uint32(bytes4(LibClone.argsOnClone(address(this), 72, 76)));
+    }
+
+    // ------------------------------------------------------------------ ENS resolver
+
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == type(IExtendedResolver).interfaceId || interfaceId == 0x01ffc9a7 // ERC-165
+            || interfaceId == ADDR || interfaceId == ADDR_COIN || interfaceId == TEXT;
+    }
+
+    /// ENSIP-10: answers any name served by this resolver.
+    function resolve(bytes calldata, bytes calldata data) external view returns (bytes memory) {
+        bytes4 selector = bytes4(data);
+        if (selector == MULTICALL) {
+            bytes[] memory calls = abi.decode(data[4:], (bytes[]));
+            for (uint256 i; i < calls.length; ++i) {
+                (, bytes memory v) = address(this).staticcall(calls[i]); // result or revert data, as ENS resolvers do
+                calls[i] = v;
+            }
+            return abi.encode(calls);
+        }
+        if (selector == ADDR || selector == ADDR_COIN || selector == TEXT) {
+            (bool ok, bytes memory v) = address(this).staticcall(data);
+            if (!ok) revert UnsupportedResolverProfile(selector);
+            return v;
+        }
+        revert UnsupportedResolverProfile(selector);
+    }
+
+    function addr(bytes32) external view returns (address) {
+        return address(this);
+    }
+
+    function addr(bytes32, uint256 coinType) external view returns (bytes memory) {
+        return coinType == COIN_TYPE_ETH ? abi.encodePacked(address(this)) : bytes("");
+    }
+
+    /// `contentcontract` (ERC-8244), plus `navik.version` and `navik.contenthash`.
+    function text(bytes32, string calldata key) external view returns (string memory) {
+        bytes32 k = keccak256(bytes(key));
+        if (k == keccak256("contentcontract")) return LibString.toHexStringChecksummed(address(this));
+        if (k == keccak256("navik.version")) return LibString.toString(version());
+        if (k == keccak256("navik.contenthash")) return LibString.toHexString(uint256(contentHash()), 32);
+        return "";
     }
 }
