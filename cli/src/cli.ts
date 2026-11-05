@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Command, Option } from 'commander'
 import * as navik from '@navik/sdk'
-import { type Address, BaseError, ContractFunctionRevertedError, getAddress, isAddress } from 'viem'
+import { type Address, getAddress, isAddress } from 'viem'
 
 import { type GlobalOptions, loadCtx } from './config.ts'
 
@@ -216,14 +216,7 @@ function tick(ok: boolean) {
   return ok ? '✓' : '✗'
 }
 
-function describe(err: unknown): string {
-  if (!(err instanceof BaseError)) return err instanceof Error ? err.message : String(err)
-  const revert = err.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null
-  if (revert?.data) return `${err.shortMessage} ${revert.data.errorName}(${(revert.data.args ?? []).join(', ')})`
-  return err.shortMessage
-}
-
 program.parseAsync().catch((err: unknown) => {
-  console.error(`error: ${describe(err)}`)
+  console.error(`error: ${navik.describeError(err)}`)
   process.exit(1)
 })

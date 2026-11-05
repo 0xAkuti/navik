@@ -3,6 +3,7 @@ import { parseAbi } from 'viem'
 export const registrarAbi = parseAbi([
   'function claim(string label, address owner) returns (address resolver, uint256 tokenId)',
   'function predictResolver(string label) view returns (address)',
+  'event ProjectClaimed(bytes32 indexed node, string label, address indexed owner, address resolver, uint256 tokenId)',
   'error InvalidLabel(string label)',
   'error LabelTaken(string label)',
 ])
@@ -57,6 +58,7 @@ export const resolverAbi = parseAbi([
   'function grantSetterRoles(bytes setter, address account) returns (bool)',
   'function revokeRoles(uint256 resource, uint256 roleBitmap, address account) returns (bool)',
   'function hasRoles(uint256 resource, uint256 roleBitmap, address account) view returns (bool)',
+  'event EACRolesChanged(uint256 indexed resource, address indexed account, uint256 oldRoleBitmap, uint256 newRoleBitmap)',
   'error EACUnauthorizedAccountRoles(uint256 resource, uint256 roleBitmap, address account)',
   'error EACCannotGrantRoles(uint256 resource, uint256 roleBitmap, address account)',
   'error EACCannotRevokeRoles(uint256 resource, uint256 roleBitmap, address account)',

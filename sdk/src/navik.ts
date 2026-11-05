@@ -346,6 +346,56 @@ export async function revoke(ctx: Ctx, project: string, account: Address, permis
   ])
 }
 
+/** What `account` may do on a project: owner, publish releases, change production. */
+export async function permissionsOf(ctx: Ctx, project: string, account: Address) {
+  const [owner, publish, promote] = await Promise.all([
+    projectOwner(ctx, project),
+    hasPermission(ctx, project, account, 'publish'),
+    hasPermission(ctx, project, account, 'promote'),
+  ])
+  return { owner: getAddress(owner) === getAddress(account), publish, promote }
+}
+
+/**
+ * Projects claimed for `owner` that it still owns. Reads registrar logs, so very large block
+ * ranges may be rejected by some RPCs; callers should keep a local list as a fallback.
+ */
+export async function projectsOf(ctx: Ctx, owner: Address): Promise<string[]> {
+  const logs = await ctx.publicClient.getContractEvents({
+    address: ctx.deployment.registrar,
+    abi: registrarAbi,
+    eventName: 'ProjectClaimed',
+    args: { owner },
+    fromBlock: BigInt(ctx.deployment.deployBlock),
+  })
+  const labels = [...new Set(logs.map((l) => l.args.label).filter((l): l is string => !!l))]
+  const owners = await Promise.all(labels.map((l) => projectOwner(ctx, l)))
+  return labels.filter((_, i) => getAddress(owners[i]) === getAddress(owner))
+}
+
+export type KeyGrant = { account: Address; publish: boolean; promote: boolean }
+
+/** Accounts holding a `grant`ed permission on the project's resolver right now (owner excluded). */
+export async function listKeys(ctx: Ctx, project: string): Promise<KeyGrant[]> {
+  const resolver = await projectResolver(ctx, project)
+  const logs = await ctx.publicClient.getContractEvents({
+    address: resolver,
+    abi: resolverAbi,
+    eventName: 'EACRolesChanged',
+    args: { resource: [textResource(PUBLISH_KEY), textResource(PRODUCTION_KEY)] },
+    fromBlock: BigInt(ctx.deployment.deployBlock),
+  })
+  const accounts = [...new Set(logs.map((l) => l.args.account).filter((a): a is Address => !!a))]
+  const grants = await Promise.all(
+    accounts.map(async (account) => ({
+      account,
+      publish: await hasPermission(ctx, project, account, 'publish'),
+      promote: await hasPermission(ctx, project, account, 'promote'),
+    })),
+  )
+  return grants.filter((g) => g.publish || g.promote)
+}
+
 export async function hasPermission(ctx: Ctx, project: string, account: Address, permission: Permission) {
   const resolver = await projectResolver(ctx, project)
   return read<boolean>(ctx, resolver, resolverAbi, 'hasRoles', [
