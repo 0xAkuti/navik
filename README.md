@@ -211,15 +211,23 @@ node ../cli/src/cli.ts verify navik.eth --raw --out /tmp/navik.html && APP_FILE=
    forge script script/Deploy.s.sol --rpc-url $MAINNET_RPC_URL --private-key $OWNER_KEY --broadcast --verify
    ```
 
-   This deploys the contracts and points navik.eth at them. It writes `contracts/deployments/1.json`, which the CLI reads, plus `1-<block>.json` as a record.
+   This deploys the contracts and points navik.eth at them. It writes `contracts/deployments/1.json`, which the CLI reads, plus `1-<block>.json` as a record. Commit both: the dashboard build embeds `1.json`, so a reproducible build needs it.
 
-3. During testing, fix mistakes by deploying again (step 2), or switch back to an earlier deployment:
+3. Publish the dashboard so `navik.eth` serves it (~24M gas), then check it against the commit:
+
+   ```bash
+   RPC_URL=$MAINNET_RPC_URL PRIVATE_KEY=$OWNER_KEY ./scripts/deploy-app.sh
+   RPC_URL=$MAINNET_RPC_URL scripts/reproduce.sh navik.eth <repo url> <commit> \
+     "pnpm install --frozen-lockfile && NAVIK_CHAINS=1 pnpm -C app build" app/dist/index.html
+   ```
+
+4. During testing, fix mistakes by deploying again (steps 2–3), or switch back to an earlier deployment:
 
    ```bash
    DEPLOYMENT=1-<block> forge script script/Attach.s.sol --rpc-url $MAINNET_RPC_URL --private-key $OWNER_KEY --broadcast
    ```
 
-4. When ready, freeze navik.eth. This is irreversible. If other wallets were granted roles on navik.eth, list them in `ALSO_REVOKE` (comma-separated); the script fails if anyone would keep the power.
+5. When ready, freeze navik.eth. This is irreversible. If other wallets were granted roles on navik.eth, list them in `ALSO_REVOKE` (comma-separated); the script fails if anyone would keep the power.
 
    ```bash
    CONFIRM_FREEZE=navik.eth forge script script/Freeze.s.sol --rpc-url $MAINNET_RPC_URL --private-key $OWNER_KEY --broadcast
