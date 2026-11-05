@@ -44,7 +44,13 @@ A custom domain can share a project's namespace. If `alice.eth` sets its subregi
 
 ## Dashboard
 
-`app/` is a dashboard for managing projects: connect a wallet, claim a project, drop in an HTML build, deploy, promote, roll back, take offline, and grant or revoke deploy keys. It is also a viewer for onchain sites: "Open a site" takes any ENS name with an ERC-8244 `contentcontract` record and works without a wallet. It:
+`app/` is a dashboard in ENS colours. Opening a site needs no wallet; connect one to manage projects:
+- **Projects:** each card shows what production serves and how many releases the project has.
+- **New project:** type a name, see whether it's available live (as in the ENS app), and claim it.
+- **Project page:** a live, hash-checked thumbnail of production, its domains, the release list (production and preview tagged; promote or roll back in one click), and an Access tab for deploy keys.
+- **Deploy:** a dialog where you drop an HTML build, see the plan (release name, chunks already onchain, transactions, address known before upload), and follow each transaction.
+
+The dashboard is also a viewer for onchain sites: "Open a site" takes any ENS name with an ERC-8244 `contentcontract` record and works without a wallet. It:
 - resolves the name through ENSv2's UniversalResolver;
 - reads the bytes from Ethereum in parallel chunks;
 - checks they are a genuine Navik release with a matching content hash;
@@ -53,7 +59,7 @@ A custom domain can share a project's namespace. If `alice.eth` sets its subregi
 You can drop a local build on the viewer to compare it with the release.
 
 It is hosted on Navik itself:
-- The build is one self-contained HTML file (~260 KB, published compressed as 5 chunks), with no CDN, fonts or analytics. Its only external fetch is the pinned anon-rpc worker code.
+- The build is one self-contained HTML file (~285 KB, published compressed as 5 chunks, ~26M gas), with no CDN, web fonts or analytics: system fonts, inline SVG icons and CSS gradient avatars keep it small. Its only external fetch is the pinned anon-rpc worker code.
 - It is published to the root project `app.navik.eth`, so `navik.eth` serves it.
 - Every version of the dashboard keeps its own permanent name (`1.app.navik.eth`, …).
 - The build is reproducible, so anyone can check that `navik.eth` serves the code in this repo (see [Verify a site against its source](#verify-a-site-against-its-source)).
@@ -84,7 +90,7 @@ A dapp's RPC provider normally sees your IP next to every address and name you l
 All numbers were measured from headless Chromium. The Tor demo gateway could not be reached while this was written. No mixnet exit can reach `127.0.0.1`, so the local fork uses the passthrough worker. It exercises the same harness, sandbox and code path, but it does not anonymize. Throughput over Nym is about 15–20 KB/s. Because mixnet round trips are slow:
 - reads are batched into JSON-RPC batches;
 - release chunks and release listings are read in parallel;
-- compression (below) matters: the dashboard is 5 chunks instead of 11.
+- compression (below) matters: the dashboard is 5 chunks instead of 12.
 
 The CLI is not covered: anon-rpc has no published Node harness yet. Point `--rpc` at your own node if you need private CLI reads.
 
@@ -213,7 +219,7 @@ node ../cli/src/cli.ts verify navik.eth --raw --out /tmp/navik.html && APP_FILE=
 
    This deploys the contracts and points navik.eth at them. It writes `contracts/deployments/1.json`, which the CLI reads, plus `1-<block>.json` as a record. Commit both: the dashboard build embeds `1.json`, so a reproducible build needs it.
 
-3. Publish the dashboard so `navik.eth` serves it (~24M gas), then check it against the commit:
+3. Publish the dashboard so `navik.eth` serves it (~26M gas), then check it against the commit:
 
    ```bash
    RPC_URL=$MAINNET_RPC_URL PRIVATE_KEY=$OWNER_KEY ./scripts/deploy-app.sh
@@ -251,7 +257,7 @@ Mainnet caps a transaction at 2^24 gas (EIP-7825), so the CLI uploads at most 2 
 
 | Site | Raw | Compressed |
 |---|---|---|
-| Navik dashboard (JS bundle, incl. the anon-rpc harness) | 260 KB, 11 chunks | 108 KB, 5 chunks (~24M gas) |
+| Navik dashboard (JS bundle, incl. the anon-rpc harness) | 285 KB, 12 chunks | 116 KB, 5 chunks (~26M gas) |
 | Text-heavy page | 114 KB, 5 chunks, ~27M gas | 9 KB, 1 chunk, 2.2M gas |
 
 Trade-offs:
