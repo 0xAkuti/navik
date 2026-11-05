@@ -74,6 +74,21 @@ navik verify "$PROJECT"
 navik verify "$PROJECT-v2.navik.eth" --out "$WORK/fetched.html"
 cmp "$WORK/fetched.html" "$WORK/v2.html" && echo "  fetched bytes == uploaded bytes"
 
+step "multi-chunk: a ~70 KB site is uploaded in batches, then published"
+{ printf '<!doctype html><title>%s</title><pre>' "$PROJECT"; head -c 52000 /dev/urandom | base64 -w 120; printf '</pre>'; } > "$WORK/big.html"
+as "$ALICE" deploy "$PROJECT" "$WORK/big.html" | tee "$WORK/out"
+grep -q "chunks       3 (0 already stored, 3 new)" "$WORK/out"
+navik verify "$PROJECT-v3" --out "$WORK/big-fetched.html"
+cmp "$WORK/big-fetched.html" "$WORK/big.html" && echo "  fetched bytes == uploaded bytes ($(wc -c < "$WORK/big.html") B)"
+
+step "multi-chunk: changing the end of the site re-uploads only the last chunk"
+{ head -c 60000 "$WORK/big.html"; printf '<!-- v4 -->'; } > "$WORK/big2.html"
+as "$ALICE" deploy "$PROJECT" "$WORK/big2.html" --promote | tee "$WORK/out"
+grep -q "chunks       3 (2 already stored, 1 new)" "$WORK/out"
+navik verify "$PROJECT" --out "$WORK/big2-fetched.html"
+cmp "$WORK/big2-fetched.html" "$WORK/big2.html" && echo "  fetched bytes == uploaded bytes"
+as "$ALICE" rollback "$PROJECT" v1
+
 step "open from Ethereum"
 navik open "$PROJECT"
 
