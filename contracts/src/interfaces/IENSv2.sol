@@ -33,6 +33,7 @@ interface IPermissionedRegistry is IRegistry {
     function hasRoles(uint256 anyId, uint256 roleBitmap, address account) external view returns (bool);
     function hasRootRoles(uint256 roleBitmap, address account) external view returns (bool);
     function grantRootRoles(uint256 roleBitmap, address account) external returns (bool);
+    function grantRoles(uint256 anyId, uint256 roleBitmap, address account) external returns (bool);
     function revokeRoles(uint256 anyId, uint256 roleBitmap, address account) external returns (bool);
     function unregister(uint256 anyId) external;
     function isEmancipated() external view returns (bool);

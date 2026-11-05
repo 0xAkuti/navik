@@ -26,7 +26,8 @@ interface IAddrResolver {
 }
 
 /// Runs against real ENSv2 on a mainnet fork. navik.eth is registered on the fork by
-/// impersonating ETHRegistrar, exactly with the roles a real purchase grants.
+/// impersonating ETHRegistrar, exactly with the roles a real purchase grants. Like a fresh
+/// deployment, navik.eth starts attached but not frozen.
 abstract contract NavikForkBase is Test {
     uint256 internal constant FORK_BLOCK = 26_349_600;
     string internal constant ROOT = "navik";
@@ -44,7 +45,7 @@ abstract contract NavikForkBase is Test {
     address internal mallory = makeAddr("navik.test.mallory");
 
     function setUp() public virtual {
-        vm.createSelectFork(vm.envOr("MAINNET_RPC_URL", string("https://ethereum-rpc.publicnode.com")), FORK_BLOCK);
+        vm.createSelectFork(vm.envOr("MAINNET_RPC_URL", string("https://eth.drpc.org")), FORK_BLOCK);
 
         vm.prank(ENSv2Mainnet.ETH_REGISTRAR);
         eth.register(
@@ -55,7 +56,7 @@ abstract contract NavikForkBase is Test {
         n = NavikDeploy.deploy(ROOT);
 
         vm.startPrank(rootOwner);
-        NavikDeploy.attachAndLock(n, ROOT, rootOwner);
+        NavikDeploy.attach(n, ROOT);
         vm.stopPrank();
     }
 
@@ -349,15 +350,93 @@ contract NavikForkTest is NavikForkBase {
 
     // ------------------------------------------- CROPS: nobody can take names
 
-    function test_navikRoot_isLocked() public {
-        uint256 id = uint256(keccak256(bytes(ROOT)));
+    function _freeze(address[] memory others) internal {
         vm.startPrank(rootOwner);
+        NavikDeploy.freeze(ROOT, rootOwner, others);
+        vm.stopPrank();
+    }
+
+    function test_root_repointableBeforeFreeze() public {
+        uint256 id = uint256(keccak256(bytes(ROOT)));
+        _claim("portfolio", alice);
+        (address d1,) = _publish(alice, "portfolio", SITE_V1);
+        assertFalse(NavikDeploy.isFrozen(ROOT));
+
+        // testing phase: the owner can switch navik.eth to fixed contracts...
+        vm.startPrank(rootOwner);
+        Navik memory fixed_ = NavikDeploy.deploy(ROOT);
+        NavikDeploy.attach(fixed_, ROOT);
+        vm.stopPrank();
+        assertEq(eth.getResolver(ROOT), address(fixed_.resolver));
+        _expectUnresolved("portfolio-v1");
+
+        // ...and back
+        vm.startPrank(rootOwner);
+        NavikDeploy.attach(n, ROOT);
+        vm.stopPrank();
+        assertEq(_text("portfolio-v1", "contentcontract"), _hex(d1));
+
+        // nobody else can
+        vm.startPrank(mallory);
         vm.expectRevert();
         eth.setResolver(id, mallory);
         vm.expectRevert();
         eth.setSubregistry(id, mallory);
         vm.stopPrank();
+    }
+
+    function test_freeze_isPermanent() public {
+        uint256 id = uint256(keccak256(bytes(ROOT)));
+        _claim("portfolio", alice);
+        (address d1,) = _publish(alice, "portfolio", SITE_V1);
+
+        _freeze(new address[](0));
+        assertTrue(NavikDeploy.isFrozen(ROOT));
+
+        vm.startPrank(rootOwner);
+        vm.expectRevert();
+        eth.setResolver(id, mallory);
+        vm.expectRevert();
+        eth.setSubregistry(id, mallory);
+        vm.expectRevert(); // admin roles are gone too: they cannot be granted back
+        eth.grantRoles(id, ENSv2Roles.ROLE_SET_RESOLVER, rootOwner);
+        vm.stopPrank();
         assertTrue(eth.isEmancipated(), "ETHRegistry has no root override");
+
+        // everything keeps working
+        assertEq(_text("portfolio-v1", "contentcontract"), _hex(d1));
+        (address d2,) = _publish(alice, "portfolio", SITE_V2);
+        _promote(alice, "portfolio", d2);
+        assertEq(_text("portfolio", "contentcontract"), _hex(d2));
+    }
+
+    function test_freeze_coversDelegatedHolders() public {
+        uint256 id = uint256(keccak256(bytes(ROOT)));
+        address hot = makeAddr("navik.test.hotWallet");
+        vm.prank(rootOwner);
+        eth.grantRoles(id, ENSv2Roles.ROLE_SET_RESOLVER, hot);
+
+        // revoking only from the owner leaves the name repointable
+        vm.prank(rootOwner);
+        eth.revokeRoles(id, NavikDeploy.ROOT_CONTROL_ROLES, rootOwner);
+        assertFalse(NavikDeploy.isFrozen(ROOT));
+        vm.prank(hot);
+        eth.setResolver(id, address(n.resolver));
+    }
+
+    function test_freeze_revokesDelegatedHolders() public {
+        uint256 id = uint256(keccak256(bytes(ROOT)));
+        address hot = makeAddr("navik.test.hotWallet");
+        vm.prank(rootOwner);
+        eth.grantRoles(id, ENSv2Roles.ROLE_SET_RESOLVER, hot);
+
+        address[] memory others = new address[](1);
+        others[0] = hot;
+        _freeze(others);
+        assertTrue(NavikDeploy.isFrozen(ROOT));
+        vm.prank(hot);
+        vm.expectRevert();
+        eth.setResolver(id, mallory);
     }
 
     function test_navikRegistry_hasNoAdmin() public view {
