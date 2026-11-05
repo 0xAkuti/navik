@@ -1,0 +1,27 @@
+{
+  "name": "@navik/app",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Navik dashboard: a single-file app that is itself hosted on navik.eth",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "e2e": "vite build && node test/e2e.ts"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@navik/sdk": "workspace:*",
+    "preact": "^11.1.1",
+    "viem": "^2.57.16"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "@types/node": "^26.6.6",
+    "playwright": "^1.64.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vite-plugin-singlefile": "^2.3.4"
+  }
+}
