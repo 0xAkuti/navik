@@ -143,7 +143,8 @@ async function view(ctx: navik.Ctx, deployment: Address) {
     alert('Content hash mismatch: refusing to open this release.')
     return
   }
-  const url = URL.createObjectURL(new Blob([v.html as BlobPart], { type: 'text/html' }))
+  const html = v.original?.html ?? v.html // gzip-wrapped releases open as their original document
+  const url = URL.createObjectURL(new Blob([html as BlobPart], { type: 'text/html' }))
   if (win) win.location.href = url
   else window.open(url, '_blank')
 }
@@ -157,19 +158,20 @@ function DeployCard(props: {
 }) {
   const { ctx, project, busy, canPromote, act } = props
   const [file, setFile] = useState<File>()
+  const [compress, setCompress] = useState(false)
   const [plan, setPlan] = useState<navik.PublishPlan>()
   const [planError, setPlanError] = useState<string>()
   const [steps, setSteps] = useState<string[]>([])
   const [drag, setDrag] = useState(false)
 
-  const pick = async (f?: File) => {
+  const pick = async (f: File | undefined, gzip = compress) => {
     setFile(f)
     setPlan(undefined)
     setPlanError(undefined)
     setSteps([])
     if (!f) return
     try {
-      setPlan(await navik.planPublish(ctx, project, new Uint8Array(await f.arrayBuffer())))
+      setPlan(await navik.planPublish(ctx, project, new Uint8Array(await f.arrayBuffer()), { compress: gzip }))
     } catch (err) {
       setPlanError(navik.describeError(err))
     }
@@ -218,6 +220,18 @@ function DeployCard(props: {
         />
         {file ? <strong>{file.name}</strong> : <span>Drop a single-file HTML build here, or click to choose</span>}
       </label>
+      <label class="check small">
+        <input
+          type="checkbox"
+          checked={compress}
+          onChange={(e) => {
+            const on = (e.currentTarget as HTMLInputElement).checked
+            setCompress(on)
+            if (file) pick(file, on)
+          }}
+        />
+        Compress (gzip): fewer chunks and lower cost; the site then needs JavaScript to render
+      </label>
       {planError && <p class="error">{planError}</p>}
       {plan && (
         <>
@@ -230,6 +244,13 @@ function DeployCard(props: {
             <dd>
               {kb(plan.size)} in {plan.chunks.length} chunk{plan.chunks.length === 1 ? '' : 's'} ({reused} already
               onchain)
+              {plan.compressed && (
+                <span class="muted">
+                  {' '}
+                  · compressed from {kb(plan.compressed.originalSize)}, {plan.compressed.originalChunks} chunk
+                  {plan.compressed.originalChunks === 1 ? '' : 's'}
+                </span>
+              )}
             </dd>
             <dt>Transactions</dt>
             <dd>
