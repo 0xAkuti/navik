@@ -4,11 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Command, Option } from 'commander'
+import * as navik from '@navik/sdk'
 import { type Address, BaseError, ContractFunctionRevertedError, getAddress, isAddress } from 'viem'
 
 import { type GlobalOptions, loadCtx } from './config.ts'
-import { parseVersion } from './names.ts'
-import * as navik from './navik.ts'
 
 const program = new Command()
   .name('navik')
@@ -95,7 +94,7 @@ program
   .argument('<version>', 'v1, v2, …')
   .action(async (project: string, version: string) => {
     const c = await ctx()
-    const v = parseVersion(version)
+    const v = navik.parseVersion(version)
     const deployment = await navik.deploymentOf(c, project, v)
     const tx = await navik.promote(c, project, deployment)
     console.log(`${navik.projectName(c, project)} → ${navik.releaseName(c, project, v)} (${deployment})`)

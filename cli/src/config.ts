@@ -1,40 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import {
-  type Account,
-  type Address,
-  type Chain,
-  createPublicClient,
-  createWalletClient,
-  type Hex,
-  http,
-  type PublicClient,
-  type Transport,
-  type WalletClient,
-} from 'viem'
+import { type Ctx, type NavikDeployment } from '@navik/sdk'
+import { type Chain, createPublicClient, createWalletClient, type Hex, http, type PublicClient } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { mainnet } from 'viem/chains'
-
-export type NavikDeployment = {
-  chainId: number
-  deployBlock: number
-  root: string
-  rootNode: Hex
-  registrar: Address
-  registry: Address
-  factory: Address
-  resolver: Address
-  ethRegistry: Address
-  universalResolver: Address
-}
-
-export type Ctx = {
-  deployment: NavikDeployment
-  publicClient: PublicClient
-  walletClient?: WalletClient<Transport, Chain, Account>
-  account?: Account
-}
 
 const DEPLOYMENTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../contracts/deployments')
 
@@ -59,9 +29,4 @@ export async function loadCtx(opts: GlobalOptions): Promise<Ctx> {
   const account = privateKeyToAccount(key)
   const walletClient = createWalletClient({ account, chain, transport })
   return { deployment, publicClient, walletClient, account }
-}
-
-export function requireWallet(ctx: Ctx): { walletClient: WalletClient<Transport, Chain, Account>; account: Account } {
-  if (!ctx.walletClient || !ctx.account) throw new Error('set PRIVATE_KEY to send transactions')
-  return { walletClient: ctx.walletClient, account: ctx.account }
 }

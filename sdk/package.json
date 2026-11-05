@@ -1,0 +1,19 @@
+{
+  "name": "@navik/sdk",
+  "version": "0.1.0",
+  "description": "Navik client: claim, publish, promote and verify onchain sites under navik.eth",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "viem": "^2.57.16"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

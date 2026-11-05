@@ -22,7 +22,7 @@ import {
   ROLE_SET_TEXT,
   ROOT_CONTROL_ROLES,
 } from './abi.ts'
-import { type Ctx, requireWallet } from './config.ts'
+import { type Ctx, requireWallet } from './types.ts'
 import { dnsEncode, isValidProjectLabel, parseContentContract, parseReleaseLabel, textResource } from './names.ts'
 
 export const PUBLISH_KEY = 'navik.publish'
