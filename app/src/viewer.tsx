@@ -1,8 +1,9 @@
 import * as navik from '@navik/sdk'
+import type { ComponentChildren } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 
-import { useReads } from './reads.ts'
-import { Badge, Card, kb, Mono } from './ui.tsx'
+import { networkById, useReads } from './reads.ts'
+import { Badge, Icon, kb, Mono, shortAddr, Spinner } from './ui.tsx'
 
 type Loaded = { v: navik.Verification; ms: number; calls: number; bytes: number }
 
@@ -49,69 +50,121 @@ export function Viewer(props: { ctx: navik.Ctx; name: string }) {
     }
   }, [ctx, name])
 
-  const ok = loaded && loaded.v.hashMatches && loaded.v.belongsToProject !== false
+  const ok = !!loaded && loaded.v.hashMatches && loaded.v.belongsToProject !== false
+  const net = reads.settings && networkById(reads.settings.network)
+  const pct = progress?.total ? Math.max(8, (100 * (progress.done ?? 0)) / progress.total) : progress ? 8 : 0
 
   return (
-    <div class="viewer">
+    <div class="page viewer">
       <form
-        class="open-form"
+        class={`urlbar ${ok ? 'ok' : error || (loaded && !ok) ? 'bad' : ''}`}
         onSubmit={(e) => {
           e.preventDefault()
           if (input) location.hash = `#/open/${input}`
         }}
       >
+        <span class="urlbar-icon" title={ok ? 'Verified onchain' : undefined}>
+          {progress ? <Spinner /> : <Icon name={ok ? 'shield' : 'search'} />}
+        </span>
         <input
           placeholder={`portfolio.${ctx.deployment.root}, 3.portfolio, alice.eth`}
           value={input}
           onInput={(e) => setInput((e.currentTarget as HTMLInputElement).value.trim().toLowerCase())}
           aria-label="Name to open"
         />
-        <button class="primary" disabled={!input}>
+        <button class="btn primary sm" disabled={!input}>
           Open
         </button>
+        {progress && <span class="urlbar-progress" style={{ width: `${pct}%` }} />}
       </form>
 
-      {error && <p class="error">{error}</p>}
+      {!name && (
+        <div class="empty">
+          <span class="feature-icon">
+            <Icon name="globe" size={20} />
+          </span>
+          <h2>Open any onchain site</h2>
+          <p class="muted">
+            Any ENS name with an ERC-8244 <Mono>contentcontract</Mono> record. Read from Ethereum through{' '}
+            {net?.anonymous ? net.name : 'your RPC'}, checked and rendered sandboxed, with no gateway.
+          </p>
+          <a class="btn" href={`#/open/${ctx.deployment.root}`}>
+            Try {ctx.deployment.root}
+          </a>
+        </div>
+      )}
+
       {progress && (
-        <p class="muted">
+        <p class="muted small center">
           {progress.step}
           {progress.total ? ` · chunk ${progress.done}/${progress.total}` : '…'}
-          {reads.phase === 'connecting' && ' (connecting to the network first)'}
+          {reads.phase === 'connecting' && net ? ` · connecting to ${net.name} first` : ''}
         </p>
+      )}
+      {error && (
+        <div class="card error-card">
+          <Icon name="x" /> {error}
+        </div>
       )}
 
       {loaded && (
-        <>
-          <Card title="Verified onchain" actions={<Badge tone={ok ? 'ok' : 'warn'}>{ok ? 'verified' : 'check failed'}</Badge>}>
+        <div class="viewer-grid">
+          {ok ? <SiteFrame v={loaded.v} /> : <div class="card error-card">This site failed verification and is not rendered.</div>}
+          <aside class="card verify">
+            <div class="row">
+              <h3>Verification</h3>
+              <span class="spacer" />
+              <Badge tone={ok ? 'ok' : 'warn'}>{ok ? 'verified' : 'check failed'}</Badge>
+            </div>
             <ul class="checks">
-              <li>
-                ✓ <Mono>{loaded.v.name}</Mono> → <Mono>{loaded.v.deployment}</Mono> via ENS
-              </li>
+              <Check ok>
+                <Mono>{loaded.v.name}</Mono> resolves to <Mono title={loaded.v.deployment}>{shortAddr(loaded.v.deployment)}</Mono> via ENS
+              </Check>
               {loaded.v.isNavikDeployment ? (
-                <li>✓ a release created by the Navik factory{loaded.v.releaseName && <>, <Mono>{loaded.v.releaseName}</Mono></>}</li>
+                <Check ok>
+                  A Navik release{loaded.v.releaseName && <>: <Mono>{loaded.v.releaseName}</Mono></>}
+                </Check>
               ) : (
-                <li class="muted">○ not a Navik release: any ERC-8244 contract, read as is</li>
+                <Check>Not a Navik release: any ERC-8244 contract, read as is</Check>
               )}
               {loaded.v.belongsToProject !== undefined && (
-                <li>{loaded.v.belongsToProject ? '✓ belongs to the named project' : '✗ does not belong to the named project'}</li>
+                <Check ok={loaded.v.belongsToProject}>
+                  {loaded.v.belongsToProject ? 'Belongs to the named project' : 'Does not belong to the named project'}
+                </Check>
               )}
-              <li>
-                {loaded.v.hashMatches ? '✓' : '✗'} {kb(loaded.v.html.length)} read from Ethereum, keccak256{' '}
-                <Mono>{loaded.v.computedHash.slice(0, 18)}…</Mono>{' '}
-                {loaded.v.isNavikDeployment ? (loaded.v.hashMatches ? 'matches the release manifest' : 'does NOT match the manifest') : ''}
-              </li>
-              {loaded.v.original && <li>✓ gzip-wrapped: decompressed to {kb(loaded.v.original.html.length)}</li>}
-              <li class="muted small">
-                {loaded.calls} calls, {kb(loaded.bytes)} in {(loaded.ms / 1000).toFixed(1)} s, routed as shown in the
-                privacy panel
-              </li>
+              {loaded.v.isNavikDeployment && (
+                <Check ok={loaded.v.hashMatches}>
+                  {loaded.v.hashMatches ? 'Content hash matches the release manifest' : 'Content hash does NOT match the manifest'}
+                </Check>
+              )}
+              {loaded.v.original && <Check ok>gzip-wrapped: decompressed to {kb(loaded.v.original.html.length)}</Check>}
             </ul>
+            <dl class="facts">
+              <dt>Size</dt>
+              <dd>{kb(loaded.v.html.length)}</dd>
+              <dt>keccak256</dt>
+              <dd>
+                <Mono title={loaded.v.computedHash}>{loaded.v.computedHash.slice(0, 14)}…</Mono>
+              </dd>
+              <dt>Read</dt>
+              <dd>
+                {loaded.calls} calls, {kb(loaded.bytes)} in {(loaded.ms / 1000).toFixed(1)} s{net && <> via {net.name}</>}
+              </dd>
+            </dl>
             <CompareBuild v={loaded.v} />
-          </Card>
-          {ok && <SiteFrame v={loaded.v} />}
-        </>
+          </aside>
+        </div>
       )}
     </div>
+  )
+}
+
+function Check(props: { ok?: boolean; children: ComponentChildren }) {
+  return (
+    <li class={props.ok === undefined ? 'muted' : props.ok ? '' : 'error'}>
+      <Icon name={props.ok === false ? 'x' : props.ok ? 'check' : 'chevron'} size={14} />
+      <span>{props.children}</span>
+    </li>
   )
 }
 
@@ -128,16 +181,17 @@ function CompareBuild(props: { v: navik.Verification }) {
             if (f) setResult({ file: f.name, cmp: navik.compareBuild(props.v, new Uint8Array(await f.arrayBuffer())) })
           }}
         />
-        Compare with a local build (e.g. built from the source repo)
+        <Icon name="upload" size={14} /> Compare with a local build
       </label>
       {result &&
         (result.cmp.matches ? (
           <p class="ok-text small">
-            ✓ {result.file} is byte-identical to the {result.cmp.matched === 'original' ? 'original document' : 'release'}
+            <Icon name="check" size={14} /> {result.file} is byte-identical to the{' '}
+            {result.cmp.matched === 'original' ? 'original document' : 'release'}
           </p>
         ) : (
           <p class="error small">
-            ✗ {result.file} differs (keccak256 <Mono>{result.cmp.hash.slice(0, 18)}…</Mono>)
+            <Icon name="x" size={14} /> {result.file} differs (keccak256 <Mono>{result.cmp.hash.slice(0, 14)}…</Mono>)
           </p>
         ))}
     </div>
@@ -153,22 +207,19 @@ function SiteFrame(props: { v: navik.Verification }) {
   const html = new TextDecoder().decode(props.v.original?.html ?? props.v.html)
   return (
     <div class="site">
-      <div class="row site-bar">
-        <span class="muted small">
-          Sandboxed: the site runs in its own opaque origin, with no access to this page or your wallet.
+      <div class="site-bar">
+        <span class="lights">
+          <i />
+          <i />
+          <i />
         </span>
+        <span class="muted small">Sandboxed: no access to this page or your wallet</span>
         <span class="spacer" />
-        <button class="ghost small" onClick={() => frame.current?.requestFullscreen?.()}>
+        <button class="btn ghost sm" onClick={() => frame.current?.requestFullscreen?.()}>
           Full screen
         </button>
       </div>
-      <iframe
-        ref={frame}
-        class="site-frame"
-        title={props.v.name}
-        sandbox="allow-scripts allow-forms allow-popups allow-modals"
-        srcdoc={html}
-      />
+      <iframe ref={frame} class="site-frame" title={props.v.name} sandbox="allow-scripts allow-forms allow-popups allow-modals" srcdoc={html} />
     </div>
   )
 }

@@ -30,8 +30,8 @@ export function PrivacyPill(props: { open: boolean; onToggle: () => void }) {
           : `Connecting to ${n.name}…`
   return (
     <button class={`pill ${tone}`} onClick={props.onToggle} aria-expanded={props.open} title="How this app reads Ethereum">
-      <span class={`dot ${tone}`} />
-      {label}
+      <i class={`dot ${tone}`} />
+      <span class="pill-label">{label}</span>
       {total > 0 && (
         <span class="pill-count">
           {r.calls.anon}/{total} via anon-rpc
@@ -66,7 +66,7 @@ export function PrivacyDrawer(props: { onClose: () => void }) {
     <section class="drawer" aria-label="Network privacy">
       <header>
         <h2>How this app reads Ethereum</h2>
-        <button class="ghost" onClick={props.onClose}>
+        <button class="btn ghost sm" onClick={props.onClose}>
           Close
         </button>
       </header>
@@ -124,11 +124,11 @@ export function PrivacyDrawer(props: { onClose: () => void }) {
               ))}
             </datalist>
             <div class="row">
-              <button class="primary" disabled={!dirty || !validRpc}>
+              <button class="btn primary sm" disabled={!dirty || !validRpc}>
                 Apply
               </button>
               {r.phase === 'failed' && (
-                <button type="button" onClick={reconnect}>
+                <button class="btn sm" type="button" onClick={reconnect}>
                   Reconnect
                 </button>
               )}
@@ -141,7 +141,7 @@ export function PrivacyDrawer(props: { onClose: () => void }) {
           <div class="row">
             <h2>Requests</h2>
             <span class="spacer" />
-            <button class="ghost small" onClick={() => setShowLog(!showLog)}>
+            <button class="btn ghost sm" onClick={() => setShowLog(!showLog)}>
               {showLog ? 'Show requests' : `Network log (${r.logs.length})`}
             </button>
           </div>
