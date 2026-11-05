@@ -9,7 +9,8 @@ import { chromium, type Page } from 'playwright'
 const RPC = process.env.RPC_URL ?? 'http://127.0.0.1:8545'
 const ALICE = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8' // anvil #1
 const CI = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC' // anvil #2
-const APP = pathToFileURL(resolve(import.meta.dirname, '../dist/index.html')).href
+// APP_FILE: e.g. the copy of the app fetched from Ethereum with `navik open navik.eth`
+const APP = pathToFileURL(process.env.APP_FILE ?? resolve(import.meta.dirname, '../dist/index.html')).href
 const SHOTS = process.env.SHOTS ?? '/tmp/navik-app'
 
 const project = `web${Date.now().toString(36)}`
