@@ -176,7 +176,10 @@ export async function verify(ctx: Ctx, name: string): Promise<Verification> {
   const fqdn = name.includes('.') ? name : `${name}.${ctx.deployment.root}`
   const deployment = await resolveContentContract(ctx, fqdn)
   if (!deployment) throw new Error(`${fqdn} has no contentcontract record`)
-  const project = fqdn.endsWith(`.${ctx.deployment.root}`) ? parseName(ctx, fqdn).project : undefined
+  const root = ctx.deployment.root
+  // navik.eth itself serves the root project's production
+  const project =
+    fqdn === root ? ctx.deployment.rootProject : fqdn.endsWith(`.${root}`) ? parseName(ctx, fqdn).project : undefined
   return verifyDeployment(ctx, deployment, fqdn, project)
 }
 
