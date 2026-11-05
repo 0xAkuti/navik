@@ -109,6 +109,20 @@ try {
     await popup.close()
   })
 
+  await step('deploy v3 compressed, view it decompressed', async () => {
+    await page.getByLabel(/Compress \(gzip\)/).check()
+    await page.locator('input[type=file]').setInputFiles({ name: 'index.html', mimeType: 'text/html', buffer: site(3) })
+    await page.getByText('compressed from').waitFor()
+    await page.getByRole('button', { name: 'Deploy', exact: true }).click()
+    await releaseRow(page, 3).waitFor()
+    const [popup] = await Promise.all([
+      page.waitForEvent('popup'),
+      releaseRow(page, 3).getByRole('button', { name: 'View' }).click(),
+    ])
+    await popup.getByText('hello from v3').waitFor()
+    await popup.close()
+  })
+
   await step('grant a deploy key, then revoke it', async () => {
     await page.getByPlaceholder('0x… key address').fill(CI)
     await page.getByRole('button', { name: 'Grant' }).click()
