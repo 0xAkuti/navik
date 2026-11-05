@@ -89,6 +89,17 @@ navik verify "$PROJECT" --out "$WORK/big2-fetched.html"
 cmp "$WORK/big2-fetched.html" "$WORK/big2.html" && echo "  fetched bytes == uploaded bytes"
 as "$ALICE" rollback "$PROJECT" v1
 
+step "compressed: a ~100 KB site stored gzip-wrapped in fewer chunks"
+{ printf '<!doctype html><title>%s</title><ol>' "$PROJECT"; for i in $(seq 1 2500); do printf '<li>row %d of a fairly repetitive table</li>' "$i"; done; printf '</ol>'; } > "$WORK/zip.html"
+as "$ALICE" deploy "$PROJECT" "$WORK/zip.html" --compress | tee "$WORK/out"
+grep -Eq "compressed   [0-9]+ → [0-9]+ bytes \([0-9]+ → 1 chunks\)" "$WORK/out"
+navik verify "$PROJECT-v5" --out "$WORK/zip-fetched.html" | tee "$WORK/out"
+grep -q "gzip-wrapped: original" "$WORK/out"
+cmp "$WORK/zip-fetched.html" "$WORK/zip.html" && echo "  decompressed bytes == original bytes ($(wc -c < "$WORK/zip.html") B)"
+navik verify "$PROJECT-v5" --raw --out "$WORK/zip-raw.html" >/dev/null
+base64 -d <<<"$(grep -o 'atob("[^"]*")' "$WORK/zip-raw.html" | sed 's/atob("//; s/")$//')" | gunzip | cmp - "$WORK/zip.html" \
+  && echo "  stored loader decodes with standard tools: base64 -d | gunzip"
+
 step "open from Ethereum"
 navik open "$PROJECT"
 
