@@ -21,15 +21,7 @@ export function textResource(key: string): bigint {
 /** Mirrors NavikNames.isValidProjectLabel. */
 export function isValidProjectLabel(label: string): boolean {
   if (!/^[a-z0-9-]{3,63}$/.test(label)) return false
-  if (label.startsWith('-') || label.endsWith('-') || label.includes('--')) return false
-  return parseReleaseLabel(label) === undefined
-}
-
-/** `<project>-v<N>` → { project, version }, mirrors NavikNames.parseVersionLabel. */
-export function parseReleaseLabel(label: string): { project: string; version: bigint } | undefined {
-  const m = /^(.+)-v([1-9][0-9]{0,18})$/.exec(label)
-  if (!m) return undefined
-  return { project: m[1], version: BigInt(m[2]) }
+  return !(label.startsWith('-') || label.endsWith('-') || label.includes('--'))
 }
 
 /** Accepts `v3`, `3` → 3n. */

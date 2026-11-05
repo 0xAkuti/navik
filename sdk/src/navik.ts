@@ -36,7 +36,7 @@ import {
 } from './abi.ts'
 import { unwrapCompressed, wrapCompressed } from './compress.ts'
 import { type Ctx, requireWallet } from './types.ts'
-import { dnsEncode, isValidProjectLabel, parseContentContract, parseReleaseLabel, textResource } from './names.ts'
+import { dnsEncode, isValidProjectLabel, parseContentContract, textResource } from './names.ts'
 
 export const PUBLISH_KEY = 'navik.publish'
 export const PRODUCTION_KEY = 'contentcontract'
@@ -46,17 +46,29 @@ const permissionKey = (p: Permission) => (p === 'publish' ? PUBLISH_KEY : PRODUC
 
 // ------------------------------------------------------------------ names
 
-export const projectName = (ctx: Ctx, project: string) => `${project}.${ctx.deployment.root}`
-export const releaseName = (ctx: Ctx, project: string, version: bigint) =>
-  `${project}-v${version}.${ctx.deployment.root}`
+export const PREVIEW_LABEL = 'preview'
 
-/** `portfolio`, `portfolio.navik.eth`, `portfolio-v3`, `portfolio-v3.navik.eth` → parts. */
-export function parseName(ctx: Ctx, input: string): { project: string; version?: bigint } {
+export const projectName = (ctx: Ctx, project: string) => `${project}.${ctx.deployment.root}`
+/** Permanent name of a release: `<N>.<project>.navik.eth`. */
+export const releaseName = (ctx: Ctx, project: string, version: bigint) =>
+  `${version}.${project}.${ctx.deployment.root}`
+/** Follows the newest release: `preview.<project>.navik.eth`. */
+export const previewName = (ctx: Ctx, project: string) => `${PREVIEW_LABEL}.${project}.${ctx.deployment.root}`
+
+/** Short names (`portfolio`, `3.portfolio`) get the root appended; full ENS names (`alice.eth`) are kept. */
+export function fullName(ctx: Ctx, name: string): string {
+  const root = ctx.deployment.root
+  return name === root || name.endsWith(`.${root}`) || name.endsWith('.eth') ? name : `${name}.${root}`
+}
+
+/** `portfolio`, `3.portfolio`, `preview.portfolio` (with or without `.navik.eth`) → parts. */
+export function parseName(ctx: Ctx, input: string): { project: string; version?: bigint; preview?: boolean } {
   const suffix = `.${ctx.deployment.root}`
-  const label = input.endsWith(suffix) ? input.slice(0, -suffix.length) : input
-  if (label.includes('.')) throw new Error(`not a ${ctx.deployment.root} name: ${input}`)
-  const release = parseReleaseLabel(label)
-  return release ?? { project: label }
+  const labels = (input.endsWith(suffix) ? input.slice(0, -suffix.length) : input).split('.')
+  if (labels.length === 1) return { project: labels[0] }
+  if (labels.length === 2 && labels[0] === PREVIEW_LABEL) return { project: labels[1], preview: true }
+  if (labels.length === 2 && /^[1-9][0-9]*$/.test(labels[0])) return { project: labels[1], version: BigInt(labels[0]) }
+  throw new Error(`not a ${ctx.deployment.root} name: ${input}`)
 }
 
 // ------------------------------------------------------------------ reads
@@ -136,7 +148,10 @@ export type Release = {
   chunks: number
 }
 
-export async function listReleases(ctx: Ctx, project: string): Promise<{ releases: Release[]; live?: Address }> {
+export async function listReleases(
+  ctx: Ctx,
+  project: string,
+): Promise<{ releases: Release[]; live?: Address; preview?: Address }> {
   const node = await projectNode(ctx, project)
   const count = await read<bigint>(ctx, ctx.deployment.factory, factoryAbi, 'versionCount', [node])
   const releases: Release[] = []
@@ -152,8 +167,11 @@ export async function listReleases(ctx: Ctx, project: string): Promise<{ release
       chunks: pointers.length,
     })
   }
-  const live = await resolveContentContract(ctx, projectName(ctx, project))
-  return { releases, live }
+  const [live, preview] = await Promise.all([
+    resolveContentContract(ctx, projectName(ctx, project)),
+    resolveContentContract(ctx, previewName(ctx, project)),
+  ])
+  return { releases, live, preview }
 }
 
 export type Verification = {
@@ -177,7 +195,7 @@ export type Verification = {
 
 /** Name → contentcontract → factory check → html() → keccak256 == manifest contentHash. */
 export async function verify(ctx: Ctx, name: string): Promise<Verification> {
-  const fqdn = name.includes('.') ? name : `${name}.${ctx.deployment.root}`
+  const fqdn = fullName(ctx, name)
   const deployment = await resolveContentContract(ctx, fqdn)
   if (!deployment) throw new Error(`${fqdn} has no contentcontract record`)
   const root = ctx.deployment.root
@@ -246,8 +264,11 @@ export async function claim(ctx: Ctx, project: string, owner?: Address) {
   if (!isValidProjectLabel(project)) throw new Error(`invalid project name "${project}"`)
   const { account } = requireWallet(ctx)
   const hash = await write(ctx, ctx.deployment.registrar, registrarAbi, 'claim', [project, owner ?? account])
-  const resolver = await read<Address>(ctx, ctx.deployment.registry, registryAbi, 'getResolver', [project])
-  return { hash, resolver, name: projectName(ctx, project) }
+  const [resolver, releaseRegistry] = await Promise.all([
+    read<Address>(ctx, ctx.deployment.registry, registryAbi, 'getResolver', [project]),
+    read<Address>(ctx, ctx.deployment.registry, registryAbi, 'getSubregistry', [project]),
+  ])
+  return { hash, resolver, releaseRegistry, name: projectName(ctx, project) }
 }
 
 /**

@@ -1,9 +1,9 @@
 import { parseAbi } from 'viem'
 
 export const registrarAbi = parseAbi([
-  'function claim(string label, address owner) returns (address resolver, uint256 tokenId)',
+  'function claim(string label, address owner) returns (address resolver, address releaseRegistry, uint256 tokenId)',
   'function predictResolver(string label) view returns (address)',
-  'event ProjectClaimed(bytes32 indexed node, string label, address indexed owner, address resolver, uint256 tokenId)',
+  'event ProjectClaimed(bytes32 indexed node, string label, address indexed owner, address resolver, address releaseRegistry, uint256 tokenId)',
   'error InvalidLabel(string label)',
   'error LabelTaken(string label)',
 ])
