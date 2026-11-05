@@ -154,20 +154,17 @@ export async function listReleases(
 ): Promise<{ releases: Release[]; live?: Address; preview?: Address }> {
   const node = await projectNode(ctx, project)
   const count = await read<bigint>(ctx, ctx.deployment.factory, factoryAbi, 'versionCount', [node])
-  const releases: Release[] = []
-  for (let v = 1n; v <= count; v++) {
-    const deployment = await read<Address>(ctx, ctx.deployment.factory, factoryAbi, 'predict', [node, v])
-    const [, , contentHash, size, pointers] = await read<Manifest>(ctx, deployment, deploymentAbi, 'manifest')
-    releases.push({
-      version: v,
-      name: releaseName(ctx, project, v),
-      deployment,
-      contentHash,
-      size,
-      chunks: pointers.length,
-    })
-  }
-  const [live, preview] = await Promise.all([
+  // in parallel: over an anonymizing network each read costs a mixnet round trip
+  const all = Promise.all(
+    Array.from({ length: Number(count) }, async (_, i): Promise<Release> => {
+      const version = BigInt(i + 1)
+      const deployment = await read<Address>(ctx, ctx.deployment.factory, factoryAbi, 'predict', [node, version])
+      const [, , contentHash, size, pointers] = await read<Manifest>(ctx, deployment, deploymentAbi, 'manifest')
+      return { version, name: releaseName(ctx, project, version), deployment, contentHash, size, chunks: pointers.length }
+    }),
+  )
+  const [releases, live, preview] = await Promise.all([
+    all,
     resolveContentContract(ctx, projectName(ctx, project)),
     resolveContentContract(ctx, previewName(ctx, project)),
   ])
@@ -194,7 +191,7 @@ export type Verification = {
 }
 
 /** Name → contentcontract → factory check → html() → keccak256 == manifest contentHash. */
-export async function verify(ctx: Ctx, name: string): Promise<Verification> {
+export async function verify(ctx: Ctx, name: string, opts: FetchOptions = {}): Promise<Verification> {
   const fqdn = fullName(ctx, name)
   const deployment = await resolveContentContract(ctx, fqdn)
   if (!deployment) throw new Error(`${fqdn} has no contentcontract record`)
@@ -202,7 +199,7 @@ export async function verify(ctx: Ctx, name: string): Promise<Verification> {
   // navik.eth itself serves the root project's production
   const project =
     fqdn === root ? ctx.deployment.rootProject : fqdn.endsWith(`.${root}`) ? parseName(ctx, fqdn).project : undefined
-  return verifyDeployment(ctx, deployment, fqdn, project)
+  return verifyDeployment(ctx, deployment, fqdn, project, opts)
 }
 
 export async function verifyDeployment(
@@ -210,11 +207,12 @@ export async function verifyDeployment(
   deployment: Address,
   name: string = deployment,
   expectedProject?: string,
+  opts: FetchOptions = {},
 ): Promise<Verification> {
-  const isNavikDeployment = await read<boolean>(ctx, ctx.deployment.factory, factoryAbi, 'isNavikDeployment', [
-    deployment,
+  const [isNavikDeployment, html] = await Promise.all([
+    read<boolean>(ctx, ctx.deployment.factory, factoryAbi, 'isNavikDeployment', [deployment]),
+    fetchHtml(ctx, deployment, opts),
   ])
-  const html = await fetchHtml(ctx, deployment)
   const computedHash = keccak256(html)
   const result: Verification = {
     name,
@@ -243,19 +241,47 @@ export async function verifyDeployment(
   return result
 }
 
-/** Exact stored bytes of a release: `html()`, or chunk by chunk if the RPC rejects one big call. */
-export async function fetchHtml(ctx: Ctx, deployment: Address): Promise<Uint8Array> {
-  try {
-    return hexToBytes(await read<Hex>(ctx, deployment, deploymentRawAbi, 'html'))
-  } catch (err) {
-    const count = await read<bigint>(ctx, deployment, deploymentAbi, 'chunkCount').catch(() => undefined)
-    if (count === undefined) throw err
-    const parts: Uint8Array[] = []
-    for (let i = 0n; i < count; i++) {
-      parts.push(hexToBytes(await read<Hex>(ctx, deployment, deploymentRawAbi, 'chunk', [i])))
-    }
-    return concatBytes(parts)
+export type FetchOptions = { onProgress?: (done: number, total: number) => void }
+
+/**
+ * Exact stored bytes of a release. Navik releases are read chunk by chunk, in parallel: smaller
+ * responses that any RPC accepts, and fast over high-latency anonymizing networks. Any other
+ * ERC-8244 contract is read with one `html()` call.
+ */
+export async function fetchHtml(ctx: Ctx, deployment: Address, opts: FetchOptions = {}): Promise<Uint8Array> {
+  const count = await read<bigint>(ctx, deployment, deploymentAbi, 'chunkCount').catch(() => undefined)
+  if (count === undefined) {
+    const html = hexToBytes(await read<Hex>(ctx, deployment, deploymentRawAbi, 'html'))
+    opts.onProgress?.(1, 1)
+    return html
   }
+  let done = 0
+  opts.onProgress?.(0, Number(count))
+  const parts = await Promise.all(
+    Array.from({ length: Number(count) }, async (_, i) => {
+      const part = hexToBytes(await read<Hex>(ctx, deployment, deploymentRawAbi, 'chunk', [BigInt(i)]))
+      opts.onProgress?.(++done, Number(count))
+      return part
+    }),
+  )
+  return concatBytes(parts)
+}
+
+export type BuildComparison = {
+  /** keccak256 of the local file. */
+  hash: Hex
+  /** The file is the release's document: its original (if gzip-wrapped) or its exact stored bytes. */
+  matches: boolean
+  /** Which onchain document it matched. */
+  matched?: 'original' | 'stored'
+}
+
+/** Checks a local build (e.g. from a reproducible `pnpm build`) against a verified release. */
+export function compareBuild(v: Verification, local: Uint8Array): BuildComparison {
+  const hash = keccak256(local)
+  if (v.hashMatches && v.original?.hash === hash) return { hash, matches: true, matched: 'original' }
+  if (v.hashMatches && v.computedHash === hash) return { hash, matches: true, matched: 'stored' }
+  return { hash, matches: false }
 }
 
 // ----------------------------------------------------------------- writes
