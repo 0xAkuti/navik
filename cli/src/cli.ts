@@ -28,7 +28,14 @@ program
   .action(async () => {
     const c = await ctx()
     const d = c.deployment
-    console.log(`root        ${d.root}${d.rootLocked ? ' (locked: nobody can repoint it)' : ' (NOT locked)'}`)
+    const root = await navik.rootStatus(c)
+    console.log(`root        ${d.root}  owner ${root.owner}`)
+    console.log(`            ${root.attached ? 'attached to these contracts' : 'NOT attached to these contracts'}`)
+    console.log(
+      root.frozen
+        ? '            frozen: nobody can repoint the namespace'
+        : '            not frozen: the owner can still repoint the namespace (testing phase)',
+    )
     console.log(`chain       ${d.chainId}`)
     console.log(`registrar   ${d.registrar}`)
     console.log(`registry    ${d.registry}`)

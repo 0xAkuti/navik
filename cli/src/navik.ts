@@ -11,7 +11,16 @@ import {
   zeroAddress,
 } from 'viem'
 
-import { deploymentAbi, deploymentRawAbi, factoryAbi, registrarAbi, registryAbi, resolverAbi, ROLE_SET_TEXT } from './abi.ts'
+import {
+  deploymentAbi,
+  deploymentRawAbi,
+  factoryAbi,
+  registrarAbi,
+  registryAbi,
+  resolverAbi,
+  ROLE_SET_TEXT,
+  ROOT_CONTROL_ROLES,
+} from './abi.ts'
 import { type Ctx, requireWallet } from './config.ts'
 import { dnsEncode, isValidProjectLabel, parseContentContract, parseReleaseLabel, textResource } from './names.ts'
 
@@ -67,6 +76,33 @@ export async function resolveContentContract(ctx: Ctx, name: string): Promise<Ad
     universalResolverAddress: ctx.deployment.universalResolver,
   })
   return value ? parseContentContract(value) : undefined
+}
+
+export type RootStatus = {
+  /** navik.eth points at this deployment's registry and resolver. */
+  attached: boolean
+  /** Nobody can repoint navik.eth anymore (control roles gone, ETHRegistry emancipated). */
+  frozen: boolean
+  owner: Address
+}
+
+export async function rootStatus(ctx: Ctx): Promise<RootStatus> {
+  const d = ctx.deployment
+  const label = d.root.slice(0, d.root.indexOf('.'))
+  const id = BigInt(keccak256(new TextEncoder().encode(label)))
+  const [subregistry, resolver, counts, emancipated, owner] = await Promise.all([
+    read<Address>(ctx, d.ethRegistry, registryAbi, 'getSubregistry', [label]),
+    read<Address>(ctx, d.ethRegistry, registryAbi, 'getResolver', [label]),
+    read<bigint>(ctx, d.ethRegistry, registryAbi, 'roleCount', [id]),
+    read<boolean>(ctx, d.ethRegistry, registryAbi, 'isEmancipated'),
+    read<Address>(ctx, d.ethRegistry, registryAbi, 'getOwner', [id]),
+  ])
+  return {
+    attached: getAddress(subregistry) === getAddress(d.registry) && getAddress(resolver) === getAddress(d.resolver),
+    // roleCount packs one 4-bit assignee count per role nybble
+    frozen: (counts & (ROOT_CONTROL_ROLES * 0xfn)) === 0n && emancipated,
+    owner,
+  }
 }
 
 export type Release = {

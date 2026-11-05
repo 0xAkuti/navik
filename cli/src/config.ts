@@ -21,7 +21,6 @@ export type NavikDeployment = {
   deployBlock: number
   root: string
   rootNode: Hex
-  rootLocked: boolean
   registrar: Address
   registry: Address
   factory: Address

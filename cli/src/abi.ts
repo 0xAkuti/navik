@@ -10,7 +10,13 @@ export const registrarAbi = parseAbi([
 export const registryAbi = parseAbi([
   'function getOwner(uint256 anyId) view returns (address)',
   'function getResolver(string label) view returns (address)',
+  'function getSubregistry(string label) view returns (address)',
+  'function roleCount(uint256 anyId) view returns (uint256)',
+  'function isEmancipated() view returns (bool)',
 ])
+
+/** Roles on the root name that can repoint the namespace (set subregistry/resolver + admins). */
+export const ROOT_CONTROL_ROLES = (1n << 20n) | ((1n << 20n) << 128n) | (1n << 24n) | ((1n << 24n) << 128n)
 
 export const factoryAbi = parseAbi([
   'function publish(string label, bytes html) returns (address deployment, uint64 version)',
