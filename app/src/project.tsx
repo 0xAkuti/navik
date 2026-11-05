@@ -114,9 +114,9 @@ export function ProjectView(props: { ctx: navik.Ctx; project: string; account: A
                       </div>
                     </td>
                     <td class="actions">
-                      <button class="ghost" onClick={() => view(ctx, r.deployment)}>
+                      <a class="button ghost" href={`#/open/${r.name}`}>
                         View
-                      </button>
+                      </a>
                       {isLive ? (
                         <Badge tone="ok">live</Badge>
                       ) : (
@@ -141,21 +141,6 @@ export function ProjectView(props: { ctx: navik.Ctx; project: string; account: A
       {data.perms.owner && <KeysCard {...props} keys={data.keys} act={act} />}
     </div>
   )
-}
-
-/** Fetches a release from Ethereum, checks its hash, and opens it locally. */
-async function view(ctx: navik.Ctx, deployment: Address) {
-  const win = window.open('', '_blank')
-  const v = await navik.verifyDeployment(ctx, deployment)
-  if (!v.hashMatches) {
-    win?.close()
-    alert('Content hash mismatch: refusing to open this release.')
-    return
-  }
-  const html = v.original?.html ?? v.html // gzip-wrapped releases open as their original document
-  const url = URL.createObjectURL(new Blob([html as BlobPart], { type: 'text/html' }))
-  if (win) win.location.href = url
-  else window.open(url, '_blank')
 }
 
 function DeployCard(props: {

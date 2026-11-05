@@ -2,15 +2,19 @@ import * as navik from '@navik/sdk'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { Address } from 'viem'
 
+import { PrivacyDrawer, PrivacyPill } from './privacy.tsx'
 import { ProjectView } from './project.tsx'
+import { loggedWallet, useReads } from './reads.ts'
+import { store } from './store.ts'
 import { Badge, Mono, shortAddr } from './ui.tsx'
+import { Viewer } from './viewer.tsx'
 import {
+  defaultChainId,
   deployments,
   discoverWallets,
   makeCtx,
   readChainId,
   requestAccount,
-  store,
   switchChain,
   type WalletInfo,
 } from './wallet.ts'
@@ -25,6 +29,8 @@ export function App() {
   const [selected, setSelected] = useState(route())
   const [busy, setBusy] = useState<string>()
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string }>()
+  const [drawer, setDrawer] = useState(false)
+  const reads = useReads()
 
   useEffect(() => discoverWallets(setWallets), [])
   useEffect(() => {
@@ -46,12 +52,24 @@ export function App() {
     }
   }, [wallet])
 
+  // reads.settings: a new network or RPC rebuilds the clients
   const ctx = useMemo(
-    () => (wallet && chainId !== undefined ? makeCtx(wallet.provider, chainId, account) : undefined),
-    [wallet, chainId, account],
+    () =>
+      wallet && chainId !== undefined
+        ? makeCtx(chainId, { provider: wallet.provider, account }, account && `account:${account}`)
+        : undefined,
+    [wallet, chainId, account, reads.settings],
+  )
+  // opening a site needs no wallet: the connected chain if Navik is on it, otherwise the default
+  const viewing = selected.startsWith('open/') ? selected.slice(5) : undefined
+  const readChain = chainId !== undefined && deployments[chainId] ? chainId : defaultChainId
+  const viewCtx = useMemo(
+    () => makeCtx(readChain, undefined, viewing ? `site:${viewing}` : undefined),
+    [readChain, viewing, reads.settings],
   )
 
-  const connect = async (w: WalletInfo) => {
+  const connect = async (info: WalletInfo) => {
+    const w = { ...info, provider: loggedWallet(info.provider, info.name) }
     try {
       setAccount(await requestAccount(w.provider))
       setChainId(await readChainId(w.provider))
@@ -83,8 +101,12 @@ export function App() {
         <a class="brand" href="#/">
           navik
         </a>
-        {ctx && <RootStatus ctx={ctx} />}
+        {(ctx ?? viewCtx) && <RootStatus ctx={(ctx ?? viewCtx)!} />}
+        <a class="nav-link" href="#/open/">
+          Open a site
+        </a>
         <span class="spacer" />
+        <PrivacyPill open={drawer} onToggle={() => setDrawer(!drawer)} />
         {account ? (
           <span class="account">
             <span class="dot" /> <Mono title={account}>{shortAddr(account)}</Mono>
@@ -99,8 +121,14 @@ export function App() {
         </div>
       )}
 
-      <main>
-        {!wallet || !account ? (
+      <main class={drawer ? 'with-drawer' : ''}>
+        {viewing !== undefined ? (
+          viewCtx ? (
+            <Viewer ctx={viewCtx} name={viewing} />
+          ) : (
+            <p class="error">Navik is not deployed on chain {readChain}.</p>
+          )
+        ) : !wallet || !account ? (
           <Welcome wallets={wallets} connect={connect} />
         ) : !ctx ? (
           <WrongChain chainId={chainId} provider={wallet} onError={(text) => setNotice({ tone: 'error', text })} />
@@ -117,18 +145,36 @@ export function App() {
           </div>
         )}
       </main>
+      {drawer && <PrivacyDrawer onClose={() => setDrawer(false)} />}
     </>
   )
 }
 
 function Welcome(props: { wallets: WalletInfo[]; connect: (w: WalletInfo) => void }) {
+  const [name, setName] = useState('')
   return (
     <div class="welcome">
       <h1>Websites that live on Ethereum, named by ENS.</h1>
       <p>
         Deploy a single-file site as an immutable contract, get a permanent name for every release (
-        <Mono>3.site.navik.eth</Mono>), and choose what <Mono>site.navik.eth</Mono> serves. No servers.
+        <Mono>3.site.navik.eth</Mono>), and choose what <Mono>site.navik.eth</Mono> serves. No servers, and every
+        read goes through an anonymizing network.
       </p>
+      <form
+        class="open-form"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (name) location.hash = `#/open/${name}`
+        }}
+      >
+        <input
+          placeholder="Open a site: portfolio.navik.eth"
+          value={name}
+          aria-label="Name to open"
+          onInput={(e) => setName((e.currentTarget as HTMLInputElement).value.trim().toLowerCase())}
+        />
+        <button disabled={!name}>Open</button>
+      </form>
       {props.wallets.length === 0 ? (
         <p class="muted">No browser wallet found. Install one to manage projects.</p>
       ) : (

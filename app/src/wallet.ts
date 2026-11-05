@@ -1,6 +1,8 @@
 import type { Ctx, NavikDeployment } from '@navik/sdk'
-import { type Address, type Chain, createClient, custom, type EIP1193Provider, getAddress, type Hex } from 'viem'
+import { type Address, type Chain, createClient, type EIP1193Provider, getAddress, type Hex } from 'viem'
 import { mainnet } from 'viem/chains'
+
+import { readTransport } from './reads.ts'
 
 declare const __NAVIK_DEPLOYMENTS__: Record<string, NavikDeployment>
 
@@ -8,6 +10,9 @@ declare const __NAVIK_DEPLOYMENTS__: Record<string, NavikDeployment>
 export const deployments: Record<number, NavikDeployment> = Object.fromEntries(
   Object.entries(__NAVIK_DEPLOYMENTS__).map(([id, d]) => [Number(id), d]),
 )
+
+/** The chain read without a wallet (e.g. when opening a site): mainnet if this build has it. */
+export const defaultChainId = deployments[1] ? 1 : Number(Object.keys(deployments)[0])
 
 export type WalletInfo = { id: string; name: string; icon?: string; provider: EIP1193Provider }
 
@@ -41,17 +46,24 @@ function chainFor(id: number): Chain {
   return id === mainnet.id ? mainnet : { ...mainnet, id, name: `Chain ${id}` }
 }
 
-/** Every read and write goes through the connected wallet's own RPC: no extra servers. */
-export function makeCtx(provider: EIP1193Provider, chainId: number, account?: Address): Ctx | undefined {
+/**
+ * Reads go through the read transport (an anon-rpc network by default); only signing and
+ * broadcasting go to the wallet. `isolationKey` separates unrelated reads (see readTransport).
+ */
+export function makeCtx(
+  chainId: number,
+  wallet?: { provider: EIP1193Provider; account?: Address },
+  isolationKey?: string,
+): Ctx | undefined {
   const deployment = deployments[chainId]
   if (!deployment) return undefined
   const chain = chainFor(chainId)
-  const transport = custom(provider)
-  const publicClient = createClient({ chain, transport })
-  if (!account) return { deployment, publicClient }
+  const publicClient = createClient({ chain, transport: readTransport(chainId, isolationKey), pollingInterval: 2_000 })
+  const account = wallet?.account
+  if (!wallet || !account) return { deployment, publicClient }
   // the wallet estimates gas, signs and broadcasts
   const send = (tx: { to: Address; data: Hex }) =>
-    provider.request({ method: 'eth_sendTransaction', params: [{ from: account, to: tx.to, data: tx.data }] })
+    wallet.provider.request({ method: 'eth_sendTransaction', params: [{ from: account, to: tx.to, data: tx.data }] })
   return { deployment, publicClient, account, send }
 }
 
@@ -67,23 +79,4 @@ export async function requestAccount(provider: EIP1193Provider): Promise<Address
 
 export async function switchChain(provider: EIP1193Provider, chainId: number) {
   await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: `0x${chainId.toString(16)}` }] })
-}
-
-/** localStorage that tolerates sandboxed contexts (contract-hosted apps often run in opaque origins). */
-export const store = {
-  get<T>(key: string, fallback: T): T {
-    try {
-      const v = localStorage.getItem(key)
-      return v ? (JSON.parse(v) as T) : fallback
-    } catch {
-      return fallback
-    }
-  },
-  set(key: string, value: unknown) {
-    try {
-      localStorage.setItem(key, JSON.stringify(value))
-    } catch {
-      // storage unavailable: the list is just not remembered
-    }
-  },
 }

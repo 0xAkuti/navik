@@ -5,7 +5,8 @@ import { defineConfig } from 'vite'
 import { viteSingleFile } from 'vite-plugin-singlefile'
 
 // Navik deployments are embedded at build time; NAVIK_CHAINS=1 builds a mainnet-only app.
-const dir = resolve(import.meta.dirname, '../contracts/deployments')
+// NAVIK_DEPLOYMENTS_DIR reads them from elsewhere (e.g. a smoke test against mainnet).
+const dir = process.env.NAVIK_DEPLOYMENTS_DIR ?? resolve(import.meta.dirname, '../contracts/deployments')
 const chains = process.env.NAVIK_CHAINS?.split(',').map((c) => c.trim())
 const deployments = Object.fromEntries(
   readdirSync(dir)
