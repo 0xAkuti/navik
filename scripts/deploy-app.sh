@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds the dashboard for the connected chain and publishes it to the root project
 # (app.navik.eth by default), promoting it so navik.eth itself serves it.
-# Needs PRIVATE_KEY of the root project owner (or a key granted publish + promote).
+# Needs the root project owner (or a key granted publish + promote): --account <name> for a
+# Foundry keystore account, or PRIVATE_KEY.
 #
 # NAVIK_PROVENANCE=1 also records on Arkiv which commit and command built it (the tree must be
 # clean; the key needs tGLM on Arkiv), and with SWARM_API + SWARM_BATCH puts the source on Swarm,

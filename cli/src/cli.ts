@@ -10,7 +10,7 @@ import { getBalance, getGasPrice } from 'viem/actions'
 
 import { closeAnon } from './anon.ts'
 import { ciRunUrl, type DeployResult, reportReproductionToGitHub, reportToGitHub } from './ci.ts'
-import { anonymized, arkivAccount, type GlobalOptions, loadArkiv, loadArkivWriter, loadCtx, swarmApi, swarmBatch } from './config.ts'
+import { anonymized, arkivAccount, type GlobalOptions, loadArkiv, loadArkivWriter, loadCtx, swarmApi, swarmBatch, useAccount } from './config.ts'
 import { buildSite, describePack, findConfig, type LoadedConfig, readSite, recordedBuild, shouldCompress } from './site.ts'
 import { describeSmoke, smoke } from './smoke.ts'
 import { extractTar, gitArchive, gitCheckout, type GitSource, gitSource, isPublicRepo, runBuild, tarCommit } from './source.ts'
@@ -30,6 +30,8 @@ const program = new Command()
     ),
   )
   .option('--deployment <file>', 'Navik deployment JSON (env NAVIK_DEPLOYMENT, default contracts/deployments/<chainId>.json)')
+  .option('--account <name>', 'sign with a Foundry keystore account (env ETH_KEYSTORE_ACCOUNT, below PRIVATE_KEY); asks for its password')
+  .hook('preAction', () => useAccount(program.opts<GlobalOptions>().account))
 
 const ctx = () => loadCtx(program.opts<GlobalOptions>())
 const permission = () =>

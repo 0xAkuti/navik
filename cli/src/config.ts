@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -16,6 +17,7 @@ import {
   type NetworkId,
   PUBLIC_RPCS,
   PUBLIC_SWARM_GATEWAY,
+  type Send,
 } from '@navik/sdk'
 import { type Address, type Chain, createPublicClient, createWalletClient, type Hex, http, type Transport } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
@@ -28,7 +30,7 @@ const DEPLOYMENTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../
 declare const __NAVIK_DEPLOYMENTS__: Record<string, NavikDeployment> | undefined
 const EMBEDDED = typeof __NAVIK_DEPLOYMENTS__ === 'undefined' ? {} : __NAVIK_DEPLOYMENTS__
 
-export type GlobalOptions = { rpc?: string; deployment?: string; anon?: boolean; anonNetwork?: string }
+export type GlobalOptions = { rpc?: string; deployment?: string; anon?: boolean; anonNetwork?: string; account?: string }
 
 /** The network chain reads go through, if the user asked for one. Decided once per run. */
 let anon: AnonNetwork | undefined
@@ -40,6 +42,29 @@ function resolveRpc(opts: GlobalOptions): string {
   const rpc = opts.rpc ?? process.env.RPC_URL ?? fallback
   anon = id ? anonNetwork(rpc, id as NetworkId) : undefined
   return rpc
+}
+
+/** `--account`, as in forge. Decided once per run. */
+let accountName: string | undefined
+export const useAccount = (name?: string) => void (accountName = name)
+
+/** Foundry's `cast` does the decrypting: it asks for the password, or reads CAST_UNSAFE_PASSWORD. */
+function unlockAccount(name: string): Hex {
+  try {
+    const out = execFileSync('cast', ['wallet', 'decrypt-keystore', name], { stdio: ['inherit', 'pipe', 'inherit'], encoding: 'utf8' })
+    const key = out.match(/0x[0-9a-fA-F]{64}/)?.[0]
+    if (key) return key as Hex
+  } catch {}
+  throw new Error(`could not unlock Foundry account "${name}" (this needs cast)`)
+}
+
+let unlocked: Hex | undefined
+
+/** --account, else PRIVATE_KEY, else ETH_KEYSTORE_ACCOUNT. An account is unlocked once, on first use. */
+function signingKey(): Hex | undefined {
+  const name = accountName ?? (process.env.PRIVATE_KEY ? undefined : process.env.ETH_KEYSTORE_ACCOUNT)
+  if (!name) return process.env.PRIVATE_KEY as Hex | undefined
+  return (unlocked ??= unlockAccount(name))
 }
 
 export async function loadCtx(opts: GlobalOptions): Promise<Ctx> {
@@ -55,11 +80,22 @@ export async function loadCtx(opts: GlobalOptions): Promise<Ctx> {
   const chain: Chain = chainId === mainnet.id ? mainnet : { ...mainnet, id: chainId, name: 'Mainnet fork' }
   const publicClient = createPublicClient({ chain, transport })
 
-  const key = process.env.PRIVATE_KEY as Hex | undefined
-  if (!key) return { deployment, publicClient }
-  const account = privateKeyToAccount(key)
-  const walletClient = createWalletClient({ account, chain, transport })
-  return { deployment, publicClient, account: account.address, send: (tx) => walletClient.sendTransaction(tx) }
+  // lazy: a keystore has no address in the clear, and reads should not ask for its password
+  const wallet = () => {
+    const key = signingKey()
+    return key && createWalletClient({ account: privateKeyToAccount(key), chain, transport })
+  }
+  return {
+    deployment,
+    publicClient,
+    get account() {
+      return wallet()?.account.address
+    },
+    get send() {
+      const client = wallet()
+      return client && ((tx: Parameters<Send>[0]) => client.sendTransaction(tx))
+    },
+  }
 }
 
 /** An explicit file, else this repo's contracts/deployments, else the ones embedded in the bundle. */
@@ -73,7 +109,7 @@ function loadDeployment(chainId: number, file?: string): NavikDeployment {
 /**
  * Arkiv (release provenance and attestations): Rabdi by default. ARKIV_ACCESS_KEY lifts the public
  * endpoint's rate limit; ARKIV_RPC points elsewhere (e.g. a local node). Writes are signed by
- * ARKIV_PRIVATE_KEY, else PRIVATE_KEY: provenance is only trusted when its writer published the
+ * ARKIV_PRIVATE_KEY, else the deploy key: provenance is only trusted when its writer published the
  * release, so the deploy key should write it.
  */
 export function arkivRpc(): string {
@@ -88,7 +124,7 @@ export function loadArkiv(): ArkivRead {
   return arkivReader(arkivTransport(), arkivChain(process.env.ARKIV_ACCESS_KEY ?? ''))
 }
 
-const arkivKey = () => (process.env.ARKIV_PRIVATE_KEY ?? process.env.PRIVATE_KEY) as Hex | undefined
+const arkivKey = () => (process.env.ARKIV_PRIVATE_KEY as Hex | undefined) ?? signingKey()
 
 /** The address that would sign Arkiv writes, if any key is set. */
 export function arkivAccount(): Address | undefined {
@@ -101,7 +137,7 @@ export const anonymized = () => !!anon
 
 export function loadArkivWriter(): ArkivWrite {
   const key = arkivKey()
-  if (!key) throw new Error('set ARKIV_PRIVATE_KEY or PRIVATE_KEY (with tGLM on Arkiv) to write to Arkiv')
+  if (!key) throw new Error('set ARKIV_PRIVATE_KEY, PRIVATE_KEY or --account (with tGLM on Arkiv) to write to Arkiv')
   return arkivWriter(arkivTransport(), privateKeyToAccount(key), arkivChain(process.env.ARKIV_ACCESS_KEY ?? ''))
 }
 
