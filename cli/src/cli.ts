@@ -391,6 +391,73 @@ program
     console.log(`  tx ${tx}`)
   })
 
+const STEP_TEXT: Record<navik.DomainStep, string> = {
+  record: 'project resolver: link the name to production (project owner)',
+  resolver: "name's resolver → the project's resolver (domain owner)",
+  subregistry: "name's subregistry → the project's release registry (domain owner)",
+}
+
+const UNLINK_TEXT: Record<navik.DomainStep, string> = {
+  record: 'project resolver: drop the link to production (project owner)',
+  resolver: "name's resolver → its previous resolver (domain owner)",
+  subregistry: "name's subregistry → its previous subregistry (domain owner)",
+}
+
+function printDomainChange(change: navik.DomainChange, text = STEP_TEXT) {
+  for (const s of change.sent) console.log(`  ✓ ${text[s.step]}\n    tx ${s.hash}`)
+  for (const s of change.waiting) console.log(`  … waiting: ${text[s]}`)
+  // this key could do none of what is left
+  if (!change.sent.length && change.waiting.length) process.exitCode = 1
+}
+
+program
+  .command('link')
+  .description('serve a project from your own name: <domain> → production, <N>.<domain> → releases')
+  .argument('<project>')
+  .argument('<domain>', 'a .eth name (or subname) you own, e.g. alice.eth')
+  .action(async (project: string, domain: string) => {
+    const c = await ctx()
+    const before = await navik.domainStatus(c, project, domain)
+    if (before.linked) return console.log(`${before.name} already serves ${navik.projectName(c, project)}`)
+    if (!before.previous && !before.done.resolver)
+      console.log(`${before.name} now uses resolver ${before.resolver}, subregistry ${before.subregistry} (recorded for unlink)`)
+    const change = await navik.linkDomain(c, project, domain)
+    printDomainChange(change)
+    if (change.waiting.length) {
+      console.log(`partly linked: the other owner runs \`navik link ${project} ${before.name}\` to finish`)
+      return
+    }
+    console.log(`linked       ${before.name} → ${navik.projectName(c, project)}`)
+    console.log(`             <N>.${before.name} and preview.${before.name} serve its releases`)
+  })
+
+program
+  .command('unlink')
+  .description("stop a name from serving a project; restores the name's previous resolver and subregistry")
+  .argument('<project>')
+  .argument('<domain>')
+  .action(async (project: string, domain: string) => {
+    const c = await ctx()
+    const change = await navik.unlinkDomain(c, project, domain)
+    printDomainChange(change, UNLINK_TEXT)
+    if (!change.sent.length && !change.waiting.length) return console.log(`${domain} is not linked to ${project}`)
+    console.log(change.waiting.length ? 'partly unlinked: the other owner runs the same command' : `unlinked     ${domain}`)
+  })
+
+program
+  .command('domains')
+  .description('list the names linked to a project')
+  .argument('<project>')
+  .action(async (project: string) => {
+    const c = await ctx()
+    const domains = await navik.listDomains(c, project)
+    if (!domains.length) console.log(`no domains linked to ${navik.projectName(c, project)}`)
+    for (const d of domains) {
+      const missing = navik.DOMAIN_STEPS.filter((s) => !d.done[s])
+      console.log(`${d.linked ? '●' : '◐'} ${d.name}  owner ${d.owner}${missing.length ? `  (missing: ${missing.join(', ')})` : ''}`)
+    }
+  })
+
 program
   .command('ls')
   .description('list releases and which one is live')
