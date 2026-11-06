@@ -128,6 +128,57 @@ fails as "$TEAM" deploy "$PROJECT" "$WORK/v2.html"
 fails as "$TEAM" promote "$PROJECT" v2
 fails as "$MALLORY" promote "$PROJECT" v2
 
+step "custom domain: alice links her own .eth name; it serves production and every release"
+ETH_REGISTRY=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).ethRegistry)' "$ROOT_DIR/contracts/deployments/$(cast chain-id --rpc-url "$RPC_URL").json")
+ETH_REGISTRAR=0xD6D8369e55c94Ae8AFA714E6cF7AB5bE54D5CC81
+ETH_OWNER_ROLES=$(python3 -c 'print((1<<20)|((1<<20)<<128)|(1<<24)|((1<<24)<<128)|((1<<28)<<128))')
+OLD_RESOLVER=0x000000000000000000000000000000000000dEaD
+register_eth() { # label owner: as ETHRegistrar would after a purchase, with a resolver already set
+  cast rpc anvil_impersonateAccount "$ETH_REGISTRAR" --rpc-url "$RPC_URL" >/dev/null
+  cast rpc anvil_setBalance "$ETH_REGISTRAR" 0xde0b6b3a7640000 --rpc-url "$RPC_URL" >/dev/null
+  cast send "$ETH_REGISTRY" "register(string,address,address,address,uint256,uint64)" "$1" "$2" \
+    0x0000000000000000000000000000000000000000 "$OLD_RESOLVER" "$ETH_OWNER_ROLES" $(( $(date +%s) + 86400 * 365 )) \
+    --from "$ETH_REGISTRAR" --unlocked --rpc-url "$RPC_URL" >/dev/null
+  cast rpc anvil_stopImpersonatingAccount "$ETH_REGISTRAR" --rpc-url "$RPC_URL" >/dev/null
+}
+resolves_to() {
+  local got
+  got=$(navik resolve "$1")
+  [[ "$got" == *"$2"* ]] || { echo "expected $1 → $2, got: $got" >&2; exit 1; }
+  echo "  $got"
+}
+DOMAIN="${PROJECT}site.eth"
+register_eth "${PROJECT}site" "$(address "$ALICE")"
+fails as "$MALLORY" link "$PROJECT" "$DOMAIN"
+as "$ALICE" link "$PROJECT" "$DOMAIN" | tee "$WORK/out"
+grep -q "uses resolver $OLD_RESOLVER" "$WORK/out"
+resolves_to "$DOMAIN" "$V1"
+resolves_to "2.$DOMAIN" "$V2"
+resolves_to "preview.$DOMAIN" "$(navik resolve "preview.$PROJECT" | awk '{print $3}')"
+as "$ALICE" promote "$PROJECT" v2 >/dev/null
+resolves_to "$DOMAIN" "$V2"
+echo "  the domain follows promotions"
+as "$ALICE" rollback "$PROJECT" v1 >/dev/null
+navik domains "$PROJECT" | grep -q "● $DOMAIN" && echo "  listed under the project's domains"
+
+step "custom domain owned by someone else: each owner does their part"
+DOMAIN2="${PROJECT}team.eth"
+register_eth "${PROJECT}team" "$(address "$MALLORY")"
+as "$ALICE" link "$PROJECT" "$DOMAIN2" | tee "$WORK/out"
+grep -q "waiting: name's resolver" "$WORK/out"
+navik domains "$PROJECT" | grep -q "◐ $DOMAIN2" && echo "  listed as partly linked"
+as "$MALLORY" link "$PROJECT" "$DOMAIN2"
+resolves_to "$DOMAIN2" "$V1"
+
+step "unlink: the domain gets its previous resolver back"
+as "$ALICE" unlink "$PROJECT" "$DOMAIN"
+navik resolve "$DOMAIN" | grep -q "(none)" && echo "  $DOMAIN no longer serves the project"
+[[ "$(cast call "$ETH_REGISTRY" "getResolver(string)(address)" "${PROJECT}site" --rpc-url "$RPC_URL")" == "$OLD_RESOLVER" ]]
+[[ "$(cast call "$ETH_REGISTRY" "getSubregistry(string)(address)" "${PROJECT}site" --rpc-url "$RPC_URL")" == 0x0000000000000000000000000000000000000000 ]]
+echo "  resolver $OLD_RESOLVER and empty subregistry restored"
+navik domains "$PROJECT" | grep -q "$DOMAIN " && { echo "$DOMAIN should not be listed" >&2; exit 1; }
+echo "  no longer listed"
+
 step "demote: production cleared, releases stay"
 as "$ALICE" demote "$PROJECT"
 live_is "(none)"
