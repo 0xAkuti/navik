@@ -12,12 +12,13 @@ import {
 } from './reads.ts'
 import { Badge, kb } from './ui.tsx'
 
-/** Header pill: where reads go right now, and how many calls stayed private. */
+/** Header pill: where reads go right now, and how many reads went through anon-rpc. */
 export function PrivacyPill(props: { open: boolean; onToggle: () => void }) {
   const r = useReads()
   if (!r.settings) return null
   const n = networkById(r.settings.network)
-  const total = r.calls.anon + r.calls.direct + r.calls.wallet
+  // wallet requests (account, chain, signing) are not reads, so they are not counted here
+  const reads = r.calls.anon + r.calls.direct
   const tone = !n || !n.anonymous ? 'warn' : r.phase === 'failed' ? 'error' : r.phase === 'ready' ? 'ok' : 'muted'
   const label = !n
     ? 'Direct reads: the RPC sees your IP'
@@ -32,9 +33,9 @@ export function PrivacyPill(props: { open: boolean; onToggle: () => void }) {
     <button class={`pill ${tone}`} onClick={props.onToggle} aria-expanded={props.open} title="How this app reads Ethereum">
       <i class={`dot ${tone}`} />
       <span class="pill-label">{label}</span>
-      {total > 0 && (
+      {reads > 0 && (
         <span class="pill-count">
-          {r.calls.anon}/{total} via anon-rpc
+          {r.calls.anon}/{reads} reads via anon-rpc
         </span>
       )}
     </button>
@@ -59,8 +60,8 @@ export function PrivacyDrawer(props: { onClose: () => void }) {
   const validRpc = /^https?:\/\/[^\s]+$/.test(rpc)
   const dirty = network !== r.settings.network || rpc !== r.settings.rpc
   const n = networkById(r.settings.network)
-  const total = r.calls.anon + r.calls.direct + r.calls.wallet
-  const pct = total ? Math.round((100 * r.calls.anon) / total) : 100
+  const reads = r.calls.anon + r.calls.direct
+  const pct = reads ? Math.round((100 * r.calls.anon) / reads) : 100
 
   return (
     <section class="drawer" aria-label="Network privacy">
@@ -73,14 +74,14 @@ export function PrivacyDrawer(props: { onClose: () => void }) {
       <div class="drawer-body">
         <div class="drawer-settings">
           <div class="meter">
-            <strong>{pct}%</strong> of {total} calls through anon-rpc
+            <strong>{pct}%</strong> of {reads} reads through anon-rpc
             {n && !n.anonymous && <Badge tone="warn">{n.name} does not anonymize</Badge>}
             <div class="meter-bar">
               <span style={{ width: `${pct}%` }} />
             </div>
             <p class="small muted">
-              {r.calls.anon} via anon-rpc ({kb(r.bytes.anon)}) · {r.calls.direct} direct ({kb(r.bytes.direct)}) ·{' '}
-              {r.calls.wallet} to your wallet (accounts, chain, signing)
+              {r.calls.anon} via anon-rpc ({kb(r.bytes.anon)}) · {r.calls.direct} direct ({kb(r.bytes.direct)}). Plus{' '}
+              {r.calls.wallet} wallet request{r.calls.wallet === 1 ? '' : 's'} (account, chain, signing), which are not reads
             </p>
             <p class="small muted">
               Names, projects, releases and site bytes are read through the anon-rpc network: the RPC provider sees a
