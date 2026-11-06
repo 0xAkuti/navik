@@ -15,6 +15,8 @@ export type DeployResult = {
   promoted: boolean
   production?: string
   preview: string
+  /** Public eth.limo link to the production or release name (mainnet only). */
+  limo?: string
   provenance?: string
   transactions: string[]
 }

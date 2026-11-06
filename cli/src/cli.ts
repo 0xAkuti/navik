@@ -49,6 +49,7 @@ program
     console.log(`registry    ${d.registry}`)
     console.log(`factory     ${d.factory}`)
     console.log(`resolver    ${d.resolver}`)
+    console.log(`pages       ${d.pages}`)
     if (c.account) console.log(`account     ${c.account}`)
   })
 
@@ -159,6 +160,8 @@ program
     console.log(`size         ${plan.size} / ${plan.maxSize} bytes`)
     console.log(`chunks       ${plan.chunks.length} (${reused} already stored, ${plan.chunks.length - reused} new)`)
     console.log(`content hash ${plan.contentHash}`)
+    const limoWarning = navik.limoWarning(plan.size)
+    if (limoWarning) console.log(`⚠ eth.limo   ${limoWarning}`)
     if (!unchanged) {
       console.log(`address      ${plan.predicted} (known before upload)`)
       console.log(`transactions ${txs}${plan.singleTx ? ' (store + publish together)' : ''}`)
@@ -205,6 +208,8 @@ program
         }
         result.production = result.project
       }
+      result.limo = navik.limoUrl(c, result.production ?? result.release)
+      if (result.limo) console.log(`open         ${result.limo}`)
       if (source && build && !unchanged) {
         result.provenance = await recordSource(c, { name: plan.name, project: result.project, site: plan.predicted }, plan, source, build, opts)
       }
