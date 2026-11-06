@@ -39,7 +39,7 @@ Written by `navik deploy … --build <cmd>` (or `navik record`), signed by the d
 
 ## `navik.attestation`: who rebuilt it, and did it match
 
-Written by `navik reproduce <name> --yes --attest`, `navik verify <name> --against <file> --attest`, or the dashboard's "Attest" button after "Compare with a local build". Signed by whoever rebuilt the site.
+Written by `navik reproduce <name> --yes --attest` (also from CI: the GitHub Action's `reproduce` mode), `navik verify <name> --against <file> --attest`, or the dashboard's "Attest" button after "Compare with a local build". Signed by whoever rebuilt the site.
 
 | Column | Type | Indexed | Meaning |
 |---|---|---|---|
@@ -51,9 +51,10 @@ Written by `navik reproduce <name> --yes --attest`, `navik verify <name> --again
 | `builtHash` | key | no | keccak256 of the builder's file |
 | `provenance` | key | no (optional) | Key of the provenance entity whose recipe was rebuilt |
 | `repo`, `commit`, `build` | str | no (optional) | The recipe used, copied from that provenance |
-| `tool` | str | no | `navik-cli` or `navik-dashboard` |
+| `tool` | str | no | `navik-cli`, `navik-ci` or `navik-dashboard` |
+| `log` | str | no (optional) | Public https log of the rebuild, e.g. the GitHub Actions run; the viewer links it |
 
-**Who can write one:** anyone; an attestation is a signed claim by its creator, shown with the creator's address. Mismatches are kept and shown in red.
+**Who can write one:** anyone; an attestation is a signed claim by its creator, shown with the creator's address (or primary ENS name). Mismatches are kept and shown in red.
 
 **Query:** `arkiv.schema = str('navik.attestation') AND chainId = u64(1) AND contentHash = key(0x…)`
 

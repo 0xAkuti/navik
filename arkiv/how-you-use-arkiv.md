@@ -16,7 +16,7 @@ Navik publishes fully onchain websites: each release is an immutable ERC-8244 co
 
 - **Nobody can edit a record**, including its writer: both entity types are created `readonly`, like the releases they describe. A correction is a new record. The client takes the newest one written by the publisher.
 - **Trust comes from the writer, not from the schema.** Anyone can write a `navik.provenance` entity for any release. The client only trusts one whose `$creator` (fixed at creation, unlike `$owner`) equals the `publisher` that Navik's factory recorded on Ethereum when the release was published. Records by others are listed as ignored. This ties Arkiv data to the ENSv2 permission model: only a key granted "publish releases" on the project can publish, so only such a key can write trusted provenance.
-- **Attestations are signed claims.** They are shown with their creator's address; mismatches are kept and shown in red, not hidden.
+- **Attestations are signed claims.** They are shown with their creator's primary ENS name, or address if it has none; mismatches are kept and shown in red, not hidden. One from CI links its public build log, so anyone can read how the rebuild ran.
 
 ## Expiry
 
@@ -34,6 +34,7 @@ Releases on Ethereum never expire, but Arkiv entities do: the protocol caps a li
 | `readonly` | Records cannot be quietly rewritten after people relied on them |
 | `permissionlessExtension` + `$expiresAt` | "On Arkiv until ~2027-05-04" and a "Keep alive 180 days" button that works for any wallet |
 | Wallet-owned writes | "Attest: I reproduced it" in the viewer, signed by the user's own wallet; no Navik server or API key involved |
+| Writes from CI | A `reproduce` job in the GitHub Action rebuilds each release on a fresh runner and attests it with a key that has no Ethereum permissions. Production is only promoted once that attestation says `match`. Viewers show it as "via navik-ci" with a "build log" link |
 
 ## What stays off Arkiv
 

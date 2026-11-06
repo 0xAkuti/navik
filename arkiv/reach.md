@@ -10,7 +10,8 @@
 
 Navik could already check a rebuild against a release (`navik verify --against`, `scripts/reproduce.sh`), but the result vanished when the terminal closed, and the recipe (repo, commit, command) had to be known out of band. Arkiv fixes both:
 - the recipe ships with the release (`navik deploy --build …`), so `navik reproduce <name> --yes` needs no other input;
-- the result is published (`--attest`), so the next user sees "reproduced ×N" instead of re-doing the work.
+- the result is published (`--attest`), so the next user sees "reproduced ×N" instead of re-doing the work;
+- CI does it on every release: the GitHub Action's `reproduce` job rebuilds each release on a fresh runner, attests the result with a link to the public run, and blocks promotion on a mismatch. Teams get a reproducibility gate for free, and their users get an attestation per release without anyone running a command. The same job can point at a site you don't own, so an auditor can attest someone else's releases on a schedule.
 
 Writing provenance is one extra flag on a command developers already run, and reading it costs users nothing: it appears in the viewer.
 
