@@ -138,4 +138,55 @@ fails as "$MALLORY" claim "9.$PROJECT"
 navik resolve "9.$PROJECT" | grep -q "(none)" || { echo "9.$PROJECT should not resolve" >&2; exit 1; }
 echo "  9.$PROJECT.navik.eth does not exist yet"
 
+if [[ -n "${ARKIV_PRIVATE_KEY:-}" ]]; then
+  # Writes go to Arkiv's testnet (Rabdi), so the key needs tGLM there; Swarm is a local stand-in
+  # for the bee API (no postage batch needed).
+  step "provenance: deploy records its source on Arkiv and puts it on Swarm"
+  BUILDER=$ARKIV_PRIVATE_KEY
+  BUILDER_ADDR=$(address "$BUILDER")
+  cast rpc anvil_setBalance "$BUILDER_ADDR" 0x8ac7230489e80000 --rpc-url "$RPC_URL" >/dev/null
+  as "$ALICE" grant "$PROJECT" "$BUILDER_ADDR" --permission publish
+  SRC="$WORK/src"
+  mkdir -p "$SRC"
+  git -C "$SRC" init -q
+  printf '<!doctype html><title>%s</title><h1>built from source</h1>' "$PROJECT" > "$SRC/page.html"
+  git -C "$SRC" add page.html
+  git -C "$SRC" -c user.name=e2e -c user.email=e2e@navik.invalid commit -qm site
+  git -C "$SRC" remote add origin "file://$SRC"
+  BUILD='mkdir -p dist && cp page.html dist/index.html'
+  (cd "$SRC" && bash -c "$BUILD")
+  SWARM_PORT=18633
+  node "$CLI_DIR/test/swarm-stub.ts" "$SWARM_PORT" >/dev/null &
+  STUB=$!
+  trap 'kill $STUB 2>/dev/null' EXIT
+  sleep 0.5
+  export SWARM_API="http://127.0.0.1:$SWARM_PORT" SWARM_BATCH="0x$(printf '0%.0s' {1..64})"
+  as "$BUILDER" deploy "$PROJECT" "$SRC/dist/index.html" --build "$BUILD" --swarm --notes "e2e $PROJECT" | tee "$WORK/out"
+  RELEASE=$(awk '/^release/ {print $2}' "$WORK/out")
+  grep -q "^provenance   file://$SRC @ " "$WORK/out"
+
+  step "provenance is read back from Arkiv and trusted: its writer published the release"
+  navik provenance "$RELEASE" | tee "$WORK/out"
+  grep -q "written by $BUILDER_ADDR, the publisher" "$WORK/out"
+  grep -q "reproduced by 0 builder(s)" "$WORK/out"
+
+  step "reproduce from Swarm (hash-checked), rebuild, compare, attest"
+  fails navik reproduce "$RELEASE"
+  as "$BUILDER" reproduce "$RELEASE" --yes --attest | tee "$WORK/out"
+  grep -q "keccak256 matches the provenance" "$WORK/out"
+  grep -q "byte-identical to $RELEASE" "$WORK/out"
+  grep -q "attested on Arkiv: entity 0x" "$WORK/out"
+
+  step "reproduce from git instead"
+  navik reproduce "$RELEASE" --yes --git | grep -q "byte-identical to $RELEASE" && echo "  git checkout rebuilds the same bytes"
+
+  step "the attestation is listed, keyed by content"
+  navik provenance "$RELEASE" | tee "$WORK/out"
+  grep -q "reproduced by 1 builder(s)" "$WORK/out"
+
+  step "anyone may extend the records"
+  as "$BUILDER" keep-alive "$RELEASE" | grep -q "extended 2 entities"
+  echo "  provenance and attestation extended"
+fi
+
 printf '\n\033[32mall e2e checks passed\033[0m\n'
