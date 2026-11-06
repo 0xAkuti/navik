@@ -270,9 +270,20 @@ if [[ -n "${ARKIV_PRIVATE_KEY:-}" ]]; then
   navik provenance "$RELEASE" | tee "$WORK/out"
   grep -q "reproduced by 1 builder(s)" "$WORK/out"
 
+  step "reproduce in GitHub Actions (simulated): attested via navik-ci with the run's log, step outputs written"
+  RUN_URL="https://github.com/navik-e2e/site/actions/runs/$PROJECT"
+  ( export GITHUB_SERVER_URL=https://github.com GITHUB_REPOSITORY=navik-e2e/site GITHUB_RUN_ID="$PROJECT" \
+      GITHUB_OUTPUT="$WORK/gh-repro" GITHUB_STEP_SUMMARY="$WORK/gh-repro-summary"
+    as "$BUILDER" reproduce "$RELEASE" --yes --git --attest ) >/dev/null
+  grep -q "^reproduced=true$" "$WORK/gh-repro" && grep -q "^attestation=0x" "$WORK/gh-repro"
+  grep -q "✓ byte-identical" "$WORK/gh-repro-summary"
+  navik provenance "$RELEASE" | tee "$WORK/out"
+  grep -q "reproduced by 2 builder(s)" "$WORK/out"
+  grep -q "via navik-ci" "$WORK/out" && grep -q "log $RUN_URL" "$WORK/out"
+
   step "anyone may extend the records"
-  as "$BUILDER" keep-alive "$RELEASE" | grep -q "extended 2 entities"
-  echo "  provenance and attestation extended"
+  as "$BUILDER" keep-alive "$RELEASE" | grep -q "extended 3 entities"
+  echo "  provenance and both attestations extended"
 fi
 
 printf '\n\033[32mall e2e checks passed\033[0m\n'
