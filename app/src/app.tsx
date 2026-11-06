@@ -236,7 +236,7 @@ function Landing(props: { onConnect: () => void; root: string }) {
     <div class="landing">
       <section class="hero">
         <div>
-          <h1>Onchain publishing, independently served.</h1>
+          <h1>Ship websites to Ethereum.</h1>
           <p class="lead">Immutable websites on Ethereum, named with ENS.</p>
           <form
             class="search"
@@ -383,12 +383,12 @@ function RootStatus(props: { ctx: navik.Ctx }) {
   return status.frozen ? (
     <span class="root-status" title={`Nobody can repoint ${props.ctx.deployment.root}, including its owner`}>
       <Badge tone="ok">
-        <Icon name="lock" size={12} /> frozen
+        <Icon name="lock" size={12} /> Frozen
       </Badge>
     </span>
   ) : (
     <span class="root-status" title={`The ${props.ctx.deployment.root} owner can still repoint the namespace`}>
-      <Badge tone="warn">testing</Badge>
+      <Badge tone="warn">Beta</Badge>
     </span>
   )
 }
