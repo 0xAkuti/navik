@@ -254,6 +254,22 @@ printf 'import("./page.js")' > "$WORK/split/assets/index.js"
 printf 'export default 1' > "$WORK/split/assets/page.js"
 fails as "$ALICE" deploy "$VITE" "$WORK/split"
 
+step "foundry account: signs with --account, reads never ask for the password"
+KEYSTORE_HOME="$WORK/home"
+mkdir -p "$KEYSTORE_HOME/.foundry/keystores"
+HOME=$KEYSTORE_HOME cast wallet import e2e --private-key "$MALLORY" --unsafe-password e2e-pass >/dev/null
+keystore() { HOME=$KEYSTORE_HOME navik "$@"; }
+KEYSTORE_PROJECT="k$PROJECT"
+ETH_KEYSTORE_ACCOUNT=e2e keystore resolve "$PROJECT" </dev/null >/dev/null
+echo "  read with an account set, no password"
+CAST_UNSAFE_PASSWORD=wrong fails keystore --account e2e claim "$KEYSTORE_PROJECT"
+CAST_UNSAFE_PASSWORD=e2e-pass keystore --account e2e claim "$KEYSTORE_PROJECT"
+CAST_UNSAFE_PASSWORD=e2e-pass ETH_KEYSTORE_ACCOUNT=e2e keystore deploy "$KEYSTORE_PROJECT" "$WORK/v1.html" --promote >/dev/null
+PUBLISHED=$(navik resolve "1.$KEYSTORE_PROJECT" | awk '{print $3}')
+got=$(navik resolve "$KEYSTORE_PROJECT")
+[[ "$got" == *"$PUBLISHED"* ]] || { echo "expected production $PUBLISHED, got: $got" >&2; exit 1; }
+echo "  $got"
+
 step "provenance by default: a note when it cannot be recorded, and the deploy still goes through"
 AUTO="${PROJECT}a"
 as "$ALICE" claim "$AUTO"
