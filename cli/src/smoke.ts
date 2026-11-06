@@ -3,9 +3,7 @@
  * no URLs of its own, and reports what broke: uncaught errors, requests for files that are not
  * part of the document, or an empty page. Uses Playwright's Chromium when it is installed.
  */
-import { createRequire } from 'node:module'
-import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { loadPlaywright } from './playwright.ts'
 
 export type SmokeReport = {
   ok: boolean
@@ -26,7 +24,7 @@ const HOST = 'http://navik-smoke.invalid/'
 const SANDBOX = 'allow-scripts allow-forms allow-popups allow-modals'
 
 export async function smoke(html: Uint8Array, waitMs = 2000): Promise<SmokeReport> {
-  const { chromium } = await loadPlaywright()
+  const { chromium } = await loadPlaywright('--smoke')
   const browser = await chromium.launch()
   try {
     const page = await browser.newPage()
@@ -80,21 +78,6 @@ export async function smoke(html: Uint8Array, waitMs = 2000): Promise<SmokeRepor
     }
   } finally {
     await browser.close()
-  }
-}
-
-/** Playwright next to the CLI, else the site's own (e.g. when the CLI runs through npx). */
-async function loadPlaywright(): Promise<typeof import('playwright')> {
-  try {
-    return await import('playwright')
-  } catch {}
-  try {
-    const path = createRequire(join(process.cwd(), 'package.json')).resolve('playwright')
-    const mod = await import(pathToFileURL(path).href)
-    // CommonJS: imported by path, its exports may only be on `default`
-    return (mod.chromium ? mod : mod.default) as typeof import('playwright')
-  } catch {
-    throw new Error('--smoke needs Playwright: `npm i -D playwright && npx playwright install chromium`')
   }
 }
 
