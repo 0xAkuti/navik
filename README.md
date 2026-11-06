@@ -78,7 +78,7 @@ It is hosted on Navik itself:
 - The build is reproducible, so anyone can check that `navik.eth` serves the code in this repo (see [Verify a site against its source](#verify-a-site-against-its-source)).
 
 ```bash
-PRIVATE_KEY=0x… ./scripts/deploy-app.sh   # build for the connected chain, deploy compressed to app.navik.eth, promote
+./scripts/deploy-app.sh --account navik   # build for the connected chain, deploy compressed to app.navik.eth, promote
 ```
 
 ## Deploy a Vite app (and from CI)
@@ -369,11 +369,11 @@ node ../cli/src/cli.ts verify navik.eth --raw --out /tmp/navik.html && APP_FILE=
 ### Mainnet
 
 1. Buy `navik.eth` in the ENS app (ENSv2).
-2. From the wallet that owns it:
+2. Import the wallet that owns it as a Foundry account (`cast wallet import navik --interactive`), then:
 
    ```bash
    cd contracts
-   forge script script/Deploy.s.sol --rpc-url $MAINNET_RPC_URL --private-key $OWNER_KEY --broadcast --verify
+   forge script script/Deploy.s.sol --rpc-url $MAINNET_RPC_URL --account navik --broadcast --verify
    ```
 
    This deploys the contracts and points navik.eth at them. It writes `contracts/deployments/1.json`, which the CLI reads, plus `1-<block>.json` as a record. Commit both: the dashboard build embeds `1.json`, so a reproducible build needs it.
@@ -381,7 +381,7 @@ node ../cli/src/cli.ts verify navik.eth --raw --out /tmp/navik.html && APP_FILE=
 3. Publish the dashboard so `navik.eth` serves it (~33M gas), then check it against the commit:
 
    ```bash
-   RPC_URL=$MAINNET_RPC_URL PRIVATE_KEY=$OWNER_KEY ./scripts/deploy-app.sh
+   RPC_URL=$MAINNET_RPC_URL ./scripts/deploy-app.sh --account navik
    RPC_URL=$MAINNET_RPC_URL scripts/reproduce.sh navik.eth <repo url> <commit> \
      "pnpm install --frozen-lockfile && NAVIK_CHAINS=1 pnpm -C app build" app/dist/index.html
    ```
@@ -389,14 +389,16 @@ node ../cli/src/cli.ts verify navik.eth --raw --out /tmp/navik.html && APP_FILE=
 4. During testing, fix mistakes by deploying again (steps 2–3), or switch back to an earlier deployment:
 
    ```bash
-   DEPLOYMENT=1-<block> forge script script/Attach.s.sol --rpc-url $MAINNET_RPC_URL --private-key $OWNER_KEY --broadcast
+   DEPLOYMENT=1-<block> forge script script/Attach.s.sol --rpc-url $MAINNET_RPC_URL --account navik --broadcast
    ```
 
 5. When ready, freeze navik.eth. This is irreversible. If other wallets were granted roles on navik.eth, list them in `ALSO_REVOKE` (comma-separated); the script fails if anyone would keep the power.
 
    ```bash
-   CONFIRM_FREEZE=navik.eth forge script script/Freeze.s.sol --rpc-url $MAINNET_RPC_URL --private-key $OWNER_KEY --broadcast
+   CONFIRM_FREEZE=navik.eth forge script script/Freeze.s.sol --rpc-url $MAINNET_RPC_URL --account navik --broadcast
    ```
+
+The CLI signs with `--account <name>` (or `ETH_KEYSTORE_ACCOUNT`) like forge, and asks for the password only when a command needs the key. It needs `cast` for this. `PRIVATE_KEY` works too, as in CI.
 
 Measured on a mainnet fork:
 
