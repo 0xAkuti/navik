@@ -45,6 +45,12 @@ function injectWallet({ rpc, account }: { rpc: string; account: string }) {
   window.addEventListener('eip6963:requestProvider', announce)
 }
 
+/** Settled screenshots: animations finished, scrolled to the top so the sticky header sits in place. */
+async function shot(page: Page, opts: { path: string; fullPage?: boolean }) {
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.screenshot({ ...opts, animations: 'disabled' })
+}
+
 async function step(name: string, fn: () => Promise<void>) {
   process.stdout.write(`• ${name} … `)
   await fn()
@@ -94,16 +100,16 @@ await page.addInitScript(injectWallet, { rpc: RPC, account: ALICE })
 try {
   await step('load the single-file app and connect the wallet', async () => {
     await page.goto(APP)
-    await page.screenshot({ path: `${SHOTS}-0-landing.png`, fullPage: true })
+    await shot(page, { path: `${SHOTS}-0-landing.png`, fullPage: true })
     await connect(page)
-    await page.screenshot({ path: `${SHOTS}-1-connected.png` })
+    await shot(page, { path: `${SHOTS}-1-connected.png` })
   })
 
   await step(`claim ${project}.navik.eth`, async () => {
     await page.getByRole('link', { name: 'New project' }).first().click()
     await page.getByLabel('Project name').fill(project)
     await page.getByText('Available').waitFor()
-    await page.screenshot({ path: `${SHOTS}-1b-claim.png` })
+    await shot(page, { path: `${SHOTS}-1b-claim.png` })
     await page.getByRole('button', { name: `Claim ${project}.navik.eth` }).click()
     await page.getByRole('heading', { name: `${project}.navik.eth` }).waitFor()
     await page.getByText('Owner', { exact: true }).waitFor()
@@ -111,7 +117,7 @@ try {
 
   await step('deploy v1 and promote it', async () => {
     await pickBuild(page, 1)
-    await page.screenshot({ path: `${SHOTS}-1c-deploy.png` })
+    await shot(page, { path: `${SHOTS}-1c-deploy.png` })
     await finishDeploy(page, 'Deploy and promote')
     await production(page).filter({ hasText: `1.${project}.navik.eth` }).waitFor()
   })
@@ -129,7 +135,7 @@ try {
   await step('roll back to v1', async () => {
     await releaseRow(page, 1).getByRole('button', { name: 'Roll back' }).click()
     await production(page).filter({ hasText: `1.${project}.navik.eth` }).waitFor()
-    await page.screenshot({ path: `${SHOTS}-2-project.png`, fullPage: true })
+    await shot(page, { path: `${SHOTS}-2-project.png`, fullPage: true })
   })
 
   await step('addresses link to Blockscout; addresses and hashes copy', async () => {
@@ -153,7 +159,7 @@ try {
     await page.getByText('A Navik release').waitFor()
     await page.getByText('Content hash matches the release manifest').waitFor()
     await siteFrame(page).getByText('hello from v2').waitFor()
-    await page.screenshot({ path: `${SHOTS}-3-viewer.png`, fullPage: true })
+    await shot(page, { path: `${SHOTS}-3-viewer.png`, fullPage: true })
     await page.goBack()
   })
 
@@ -193,7 +199,7 @@ try {
     await page.getByText(/100% of \d+ reads through anon-rpc/).waitFor()
     const summary = await page.locator('.meter p').first().innerText()
     assert.match(summary, /^[1-9]\d* via anon-rpc .* · 0 direct .*Plus [1-9]\d* wallet requests/, summary)
-    await page.screenshot({ path: `${SHOTS}-4-privacy.png` })
+    await shot(page, { path: `${SHOTS}-4-privacy.png` })
     await page.locator('.drawer').getByRole('button', { name: 'Close' }).click()
   })
 
@@ -203,7 +209,7 @@ try {
     await connect(page)
     const card = page.locator('.project-card', { hasText: project })
     await card.getByText('release', { exact: false }).waitFor()
-    await page.screenshot({ path: `${SHOTS}-5-projects.png` })
+    await shot(page, { path: `${SHOTS}-5-projects.png` })
   })
 
   await step('no requests left the page except to the RPC and the pinned worker code', async () => {
@@ -214,7 +220,7 @@ try {
     const viewer = await browser.newPage()
     await viewer.goto(`${APP}#/open/1.${project}.navik.eth`)
     await siteFrame(viewer).getByText('hello from v1').waitFor()
-    await viewer.screenshot({ path: `${SHOTS}-6-viewer-no-wallet.png` })
+    await shot(viewer, { path: `${SHOTS}-6-viewer-no-wallet.png` })
     await viewer.locator('.compare input[type=file]').setInputFiles({ name: 'index.html', mimeType: 'text/html', buffer: site(1) })
     await viewer.getByText('index.html is byte-identical to the release').waitFor()
     await viewer.locator('.compare input[type=file]').setInputFiles({ name: 'other.html', mimeType: 'text/html', buffer: site(9) })
@@ -237,7 +243,7 @@ try {
   })
   console.log(`\nall app e2e checks passed (screenshots: ${SHOTS}-*.png)`)
 } catch (err) {
-  await page.screenshot({ path: `${SHOTS}-failure.png`, fullPage: true })
+  await shot(page, { path: `${SHOTS}-failure.png`, fullPage: true })
   console.error(`\nfailed; screenshot: ${SHOTS}-failure.png`)
   throw err
 } finally {
