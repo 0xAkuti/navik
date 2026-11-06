@@ -95,6 +95,19 @@ program
   })
 
 program
+  .command('config')
+  .description('print the navik.json in use (found here or in a parent directory), or one of its fields')
+  .argument('[field]', 'e.g. project')
+  .action((field?: string) => {
+    const config = findConfig()
+    if (!config) throw new Error(`no navik.json in ${process.cwd()} or its parents`)
+    const { dir: _, file, ...fields } = config
+    if (!field) return console.log(`${file}\n${JSON.stringify(fields, null, 2)}`)
+    if (!(field in fields)) throw new Error(`${file} has no "${field}"`)
+    console.log(fields[field as keyof typeof fields])
+  })
+
+program
   .command('deploy')
   .description('publish a site as a new permanent release; with no <path>, build and ship what navik.json describes')
   .argument('[project]', 'default: "project" in navik.json')
