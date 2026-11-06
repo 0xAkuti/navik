@@ -35,7 +35,15 @@ navik.eth                         resolver: NavikResolver (serves app.navik.eth'
    └─ preview.portfolio.navik.eth   resolver repointed by the factory to the newest release
 ```
 
-A custom domain can share a project's namespace. If `alice.eth` sets its subregistry to the project's release registry and links its record to the project (`linkToNode`), then `alice.eth` serves production, and `3.alice.eth` and `preview.alice.eth` work with no extra records.
+**Custom domains.** `navik link portfolio alice.eth`, or the project's Domains tab, makes a name you own serve the project: `alice.eth` serves production and follows every promotion, and `3.alice.eth` and `preview.alice.eth` serve releases. Nothing is copied. It uses ENSv2's two kinds of aliasing, which live in different contracts:
+
+| Write | Contract | Signed by | Effect |
+|---|---|---|---|
+| `multicall(setText, linkToNode)` | project's Permissioned Resolver | project owner | `alice.eth` uses the project's production record. The name's previous resolver and subregistry are stored on the project's resolver, so they can be restored |
+| `setResolver` | the name's registry (ETHRegistry for `alice.eth`) | domain owner | the name resolves through the project's resolver |
+| `setSubregistry` | the same registry | domain owner | `<N>.alice.eth` and `preview.alice.eth` resolve through the project's release registry |
+
+That makes three transactions (registries have no multicall), all from one wallet when you own both the domain and the project. If the domain and the project have different owners, each runs `link` or uses the Domains tab and only sends their own part. `navik domains portfolio` lists linked names, partly linked ones included. While a name is linked, its own records (address, avatar…) and its existing subnames are hidden. `navik unlink portfolio alice.eth` restores its previous resolver and subregistry.
 
 | Contract | Role |
 |---|---|
@@ -49,7 +57,7 @@ A custom domain can share a project's namespace. If `alice.eth` sets its subregi
 `app/` is a dashboard in ENS colours. Opening a site needs no wallet; connect one to manage projects:
 - **Projects:** each card shows what production serves and how many releases the project has.
 - **New project:** type a name, see whether it's available live (as in the ENS app), and claim it.
-- **Project page:** a live, hash-checked thumbnail of production, its domains, the release list (production and preview tagged; promote or roll back in one click), and an Access tab for deploy keys.
+- **Project page:** a live, hash-checked thumbnail of production, the release list (production and preview tagged; promote or roll back in one click), a Domains tab to link names you own ([custom domains](#how-it-works)), and an Access tab for deploy keys.
 - **Deploy:** a dialog where you drop an HTML build, see the plan (release name, chunks already onchain, transactions, address known before upload), and follow each transaction.
 
 The dashboard is also a viewer for onchain sites: "Open a site" takes any ENS name with an ERC-8244 `contentcontract` record and works without a wallet. It:
@@ -62,7 +70,7 @@ The dashboard is also a viewer for onchain sites: "Open a site" takes any ENS na
 You can drop a local build on the viewer to compare it with the release, then attest the result on Arkiv with your wallet.
 
 It is hosted on Navik itself:
-- The build is one self-contained HTML file (~340 KB, published compressed as 6 chunks, ~33M gas), with no CDN, web fonts or analytics: system fonts and inline SVG icons keep it small. Names and addresses get the ENS app's [etherloom](https://github.com/ensdomains/etherloom) identicons (generated locally, ~3.6 KB), addresses link to Blockscout, and every address and hash has a copy button. Its only external fetch is the pinned anon-rpc worker code.
+- The build is one self-contained HTML file (~350 KB, published compressed as 6 chunks, ~33M gas), with no CDN, web fonts or analytics: system fonts and inline SVG icons keep it small. Names and addresses get the ENS app's [etherloom](https://github.com/ensdomains/etherloom) identicons (generated locally, ~3.6 KB), addresses link to Blockscout, and every address and hash has a copy button. Its only external fetch is the pinned anon-rpc worker code.
 - It is published to the root project `app.navik.eth`, so `navik.eth` serves it.
 - Every version of the dashboard keeps its own permanent name (`1.app.navik.eth`, …).
 - The build is reproducible, so anyone can check that `navik.eth` serves the code in this repo (see [Verify a site against its source](#verify-a-site-against-its-source)).
@@ -210,7 +218,7 @@ More detail in [`arkiv/`](arkiv/): [schema](arkiv/schema.md), [how we use Arkiv]
 | Forever, non-transferable names with no parent control | Release names: no expiry, no roles, emancipated registry | Cannot change, move or disappear |
 | Tokenized subnames (ERC-1155) owned by users | Who owns a project | Owner transfers → new wallet controls it |
 | A resolver per name | Each release resolves itself; `preview`'s resolver is repointed per publish | Publish → preview moves; releases never do |
-| Namespace aliasing via a shared registry + record aliasing (`linkToNode`) | Custom domains: `alice.eth`, `3.alice.eth`, `preview.alice.eth` | Unlink → the domain stops following |
+| Namespace aliasing via a shared registry + record aliasing (`linkToNode`) | Custom domains: `alice.eth`, `3.alice.eth`, `preview.alice.eth` (`navik link`, Domains tab) | Unlink → the domain gets its previous resolver and subregistry back |
 | One Permissioned Resolver per project, deployed via VerifiableFactory | What is live: `text("contentcontract")` | Set it → site changes; set an older release → rollback |
 | Enhanced Access Control, setter-scoped grants (`grantSetterRoles`) | Least-privilege deploy keys: `navik.publish` vs `contentcontract` | Revoke → the key's next deploy reverts |
 | Per-project EAC scope | Isolation: a key for one project is useless on another | — |
@@ -283,6 +291,7 @@ export RPC_URL=http://127.0.0.1:8545 PRIVATE_KEY=0x…
 node src/cli.ts claim portfolio
 node src/cli.ts deploy portfolio ./index.html --promote
 node src/cli.ts grant portfolio 0xCI… --permission publish   # preview-only key
+node src/cli.ts link portfolio alice.eth                     # alice.eth serves production, 3.alice.eth release 3
 node src/cli.ts rollback portfolio v1
 node src/cli.ts ls portfolio
 node src/cli.ts verify portfolio
@@ -291,7 +300,7 @@ node src/cli.ts open 2.portfolio.navik.eth
 node src/cli.ts provenance portfolio                         # source and reproductions, from Arkiv
 (cd ../examples/viem-vite && node ../../cli/src/cli.ts deploy --smoke)   # build, pack and ship from navik.json
 
-# full CLI flow (claim → deploy → grants → rollback → multi-chunk → revoke → isolation → demote →
+# full CLI flow (claim → deploy → grants → rollback → multi-chunk → revoke → isolation → custom domains → demote →
 # the Vite example from navik.json, smoke-tested → unchanged re-deploy → code splitting rejected);
 # with ARKIV_PRIVATE_KEY set (tGLM on Rabdi) also provenance → Swarm (local stand-in) → reproduce → attest
 pnpm run e2e
@@ -347,6 +356,7 @@ Measured on a mainnet fork:
 | Store + publish a site of up to 2 full chunks (one tx, `publishContent`) | 11.8M for 49,150 B |
 | Publish already-stored chunks (incl. naming the release) | ~370k |
 | Claim a project (resolver + release registry) | ~720k |
+| Link a custom domain (3 transactions: 173k + 40k + 58k) / unlink it | ~271k / ~145k |
 | Read `html()` of a 491 KB site (`eth_call`) | 2.85M |
 
 Mainnet caps a transaction at 2^24 gas (EIP-7825), so the CLI uploads at most 2 chunks per transaction. An upload interrupted halfway resumes: re-running `deploy` skips chunks that are already onchain.
@@ -357,7 +367,7 @@ Mainnet caps a transaction at 2^24 gas (EIP-7825), so the CLI uploads at most 2 
 
 | Site | Raw | Compressed |
 |---|---|---|
-| Navik dashboard (JS bundle, incl. the anon-rpc harness and Arkiv) | 340 KB, 14 chunks | 141 KB, 6 chunks (~33M gas) |
+| Navik dashboard (JS bundle, incl. the anon-rpc harness and Arkiv) | 353 KB, 15 chunks | 145 KB, 6 chunks (~33M gas) |
 | Text-heavy page | 114 KB, 5 chunks, ~27M gas | 9 KB, 1 chunk, 2.2M gas |
 
 Trade-offs:
