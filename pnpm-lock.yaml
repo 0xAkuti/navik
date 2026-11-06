@@ -66,6 +66,9 @@ importers:
 
   sdk:
     dependencies:
+      '@arkiv-network/sdk':
+        specifier: 1.0.1
+        version: 1.0.1(typescript@7.0.2)(viem@2.57.16(typescript@7.0.2))
       viem:
         specifier: ^2.57.16
         version: 2.57.16(typescript@7.0.2)
@@ -84,6 +87,16 @@ packages:
 
   '@anon-rpc/harness-core@0.4.0':
     resolution: {integrity: sha512-ZFVeE0tkUgXPw1qu99s8JPKD4jFatHZ+nELisZ4WF+YMpCrBFIvpJe0qdCoLcmbhH1brbsC35qe8F1G3HxIbgA==}
+
+  '@arkiv-network/sdk@1.0.1':
+    resolution: {integrity: sha512-DCOFdGunn4I5nYrvIV/YIkMCkLZM7EQNSyNPtqpmQkP2JzTEfRLBJleBSB2rokWMa833/9P8DMiwsEXACr3CUQ==}
+    engines: {node: '>=18.0.0'}
+    peerDependencies:
+      typescript: '>=5.0.0'
+      viem: ^2.0.0
+    peerDependenciesMeta:
+      typescript:
+        optional: true
 
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw==}
@@ -904,6 +917,12 @@ snapshots:
   '@anon-rpc/harness-core@0.4.0':
     dependencies:
       '@noble/hashes': 1.8.0
+
+  '@arkiv-network/sdk@1.0.1(typescript@7.0.2)(viem@2.57.16(typescript@7.0.2))':
+    dependencies:
+      viem: 2.57.16(typescript@7.0.2)
+    optionalDependencies:
+      typescript: 7.0.2
 
   '@babel/code-frame@7.29.7':
     dependencies:

@@ -475,6 +475,18 @@ export async function projectsOf(ctx: Ctx, owner: Address): Promise<string[]> {
   return labels.filter((_, i) => getAddress(owners[i]) === getAddress(owner))
 }
 
+/** The account that published a release, from the factory's DeploymentPublished event. */
+export async function publisherOf(ctx: Ctx, deployment: Address): Promise<Address | undefined> {
+  const [log] = await getContractEvents(ctx.publicClient, {
+    address: ctx.deployment.factory,
+    abi: factoryAbi,
+    eventName: 'DeploymentPublished',
+    args: { deployment },
+    fromBlock: BigInt(ctx.deployment.deployBlock),
+  })
+  return log?.args.publisher
+}
+
 export type KeyGrant = { account: Address; publish: boolean; promote: boolean }
 
 /** Accounts holding a `grant`ed permission on the project's resolver right now (owner excluded). */
