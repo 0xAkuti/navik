@@ -1,9 +1,12 @@
-import { BaseError, ContractFunctionRevertedError } from 'viem'
+import { BaseError, ContractFunctionRevertedError, HttpRequestError } from 'viem'
 
 /** Short message for any error, with decoded revert reasons (e.g. `EACUnauthorizedAccountRoles(...)`). */
 export function describeError(err: unknown): string {
   if (!(err instanceof BaseError)) return err instanceof Error ? err.message : String(err)
   const revert = err.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null
   if (revert?.data) return `${err.shortMessage} ${revert.data.errorName}(${(revert.data.args ?? []).join(', ')})`
-  return err.shortMessage
+  // the transport's real cause: an HTTP status, or why the fetch itself failed
+  const http = err.walk((e) => e instanceof HttpRequestError) as HttpRequestError | null
+  const cause = http && [http.status, http.details].filter(Boolean).join(' ')
+  return cause ? `${err.shortMessage.replace(/\.$/, '')}: ${cause}` : err.shortMessage
 }
