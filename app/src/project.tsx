@@ -4,7 +4,7 @@ import { type Address, getAddress, isAddress } from 'viem'
 
 import type { Run } from './app.tsx'
 import { DomainsCard } from './domains.tsx'
-import { Addr, Avatar, Badge, Hash, Icon, kb, Modal, Mono, Spinner } from './ui.tsx'
+import { Addr, Avatar, Badge, Hash, Icon, kb, Modal, Mono, Spinner, Who } from './ui.tsx'
 
 type Data = {
   owner: Address
@@ -80,7 +80,7 @@ export function ProjectView(props: { ctx: navik.Ctx; project: string; tab?: stri
               {role && <Badge tone={data?.perms.owner ? 'blue' : 'muted'}>{role}</Badge>}
               {data && (
                 <span>
-                  owned by <Addr address={data.owner} chainId={ctx.deployment.chainId} />
+                  owned by <Who ctx={ctx} address={data.owner} chainId={ctx.deployment.chainId} />
                 </span>
               )}
             </div>
@@ -449,7 +449,7 @@ function AccessCard(props: { ctx: navik.Ctx; project: string; data: Data; busy: 
             keys.map((k) => (
               <div key={k.account} class="key-row">
                 <Avatar seed={k.account.toLowerCase()} size={24} />
-                <Addr address={k.account} chainId={ctx.deployment.chainId} full />
+                <Who ctx={ctx} address={k.account} chainId={ctx.deployment.chainId} full />
                 {k.publish && <Badge tone="blue">deploy</Badge>}
                 {k.promote && <Badge tone="blue">promote</Badge>}
                 <span class="spacer" />

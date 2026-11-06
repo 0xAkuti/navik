@@ -2,13 +2,12 @@ import * as navik from '@navik/sdk'
 import type { ComponentChildren } from 'preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { Address } from 'viem'
-import { getEnsName } from 'viem/actions'
 
 import { PrivacyDrawer, PrivacyPill } from './privacy.tsx'
 import { ProjectView } from './project.tsx'
 import { loggedWallet, useReads } from './reads.ts'
 import { store } from './store.ts'
-import { Addr, Avatar, Badge, CopyButton, Icon, Logo, Modal, Mono, shortAddr, Spinner } from './ui.tsx'
+import { Addr, Avatar, Badge, CopyButton, Icon, Logo, Modal, Mono, primaryName, shortAddr, Spinner } from './ui.tsx'
 import { Viewer } from './viewer.tsx'
 import {
   defaultChainId,
@@ -200,11 +199,7 @@ function AccountChip(props: { ctx?: navik.Ctx; account: Address }) {
   const [name, setName] = useState<string>()
   useEffect(() => {
     setName(undefined)
-    if (!props.ctx) return
-    getEnsName(props.ctx.publicClient, {
-      address: props.account,
-      universalResolverAddress: props.ctx.deployment.universalResolver,
-    }).then((n) => setName(n ?? undefined), () => undefined)
+    if (props.ctx) primaryName(props.ctx, props.account).then(setName)
   }, [props.ctx, props.account])
   return (
     <span class="chip" title={props.account}>

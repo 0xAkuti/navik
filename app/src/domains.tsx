@@ -3,26 +3,26 @@ import { useCallback, useEffect, useState } from 'preact/hooks'
 import { type Address, getAddress, zeroAddress } from 'viem'
 
 import type { Run } from './app.tsx'
-import { Addr, Avatar, Badge, Icon, Mono, Spinner } from './ui.tsx'
+import { Addr, Avatar, Badge, Icon, Mono, Spinner, Who } from './ui.tsx'
 
 const same = (a: Address, b: Address) => getAddress(a) === getAddress(b)
 
 /** Who has to sign each step, for the account looking at it. */
-function stepText(d: navik.Domain, step: navik.DomainStep, projectOwner: Address) {
-  const who = (owner: Address) => (d.can[step] ? 'you' : <Addr address={owner} />)
+function stepText(ctx: navik.Ctx, d: navik.Domain, step: navik.DomainStep, projectOwner: Address) {
+  const who = (owner: Address) => (d.can[step] ? 'you' : <Who ctx={ctx} address={owner} chainId={ctx.deployment.chainId} />)
   if (step === 'record') return <>Link the name to production on the project's resolver · {who(projectOwner)}</>
   if (step === 'resolver') return <>Point the name at the project's resolver · {who(d.owner)}</>
   return <>Share the project's release registry, for {'<N>'}.{d.name} · {who(d.owner)}</>
 }
 
-function Steps(props: { domain: navik.Domain; projectOwner: Address }) {
+function Steps(props: { ctx: navik.Ctx; domain: navik.Domain; projectOwner: Address }) {
   const d = props.domain
   return (
     <ol class="domain-steps">
       {navik.DOMAIN_STEPS.map((s) => (
         <li key={s} class={d.done[s] ? 'done' : ''}>
           <span class="step-mark">{d.done[s] ? <Icon name="check" size={13} /> : null}</span>
-          <span>{stepText(d, s, props.projectOwner)}</span>
+          <span>{stepText(props.ctx, d, s, props.projectOwner)}</span>
         </li>
       ))}
     </ol>
@@ -132,7 +132,7 @@ export function DomainsCard(props: { ctx: navik.Ctx; project: string; projectOwn
                   Unlink
                 </button>
               )}
-              {!d.linked && <Steps domain={d} projectOwner={props.projectOwner} />}
+              {!d.linked && <Steps ctx={ctx} domain={d} projectOwner={props.projectOwner} />}
             </div>
           ))
         )}
@@ -162,12 +162,12 @@ export function DomainsCard(props: { ctx: navik.Ctx; project: string; projectOwn
             <strong>{checked.name}</strong>
             {checked.linked && <Badge tone="ok">Linked</Badge>}
             <span class="muted small">
-              owned by <Addr address={checked.owner} chainId={ctx.deployment.chainId} />
+              owned by <Who ctx={ctx} address={checked.owner} chainId={ctx.deployment.chainId} />
             </span>
           </div>
           {!checked.linked && (
             <>
-              <Steps domain={checked} projectOwner={props.projectOwner} />
+              <Steps ctx={ctx} domain={checked} projectOwner={props.projectOwner} />
               {!checked.done.resolver && !same(checked.resolver, zeroAddress) && (
                 <p class="muted small">
                   While linked, {checked.name} resolves from the project: its own records (address, avatar…) and existing subnames are

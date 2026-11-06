@@ -1,6 +1,9 @@
 import { generatePatternDataURI } from '@ensdomains/etherloom'
+import type { Ctx } from '@navik/sdk'
 import type { ComponentChildren } from 'preact'
 import { useEffect, useState } from 'preact/hooks'
+import type { Address } from 'viem'
+import { getEnsName } from 'viem/actions'
 
 export function shortAddr(a: string) {
   return `${a.slice(0, 6)}…${a.slice(-4)}`
@@ -126,6 +129,53 @@ export function Addr(props: { address: string; chainId?: number; full?: boolean;
         </a>
       ) : (
         text
+      )}
+      <CopyButton value={props.address} />
+    </span>
+  )
+}
+
+const primaryNames = new Map<string, Promise<string | undefined>>()
+
+/** An address's primary ENS name (checked forward by the UniversalResolver), read like every other read; cached. */
+export function primaryName(ctx: Ctx, address: Address): Promise<string | undefined> {
+  const key = `${ctx.deployment.chainId}:${address.toLowerCase()}`
+  let name = primaryNames.get(key)
+  if (!name) {
+    name = getEnsName(ctx.publicClient, { address, universalResolverAddress: ctx.deployment.universalResolver }).then(
+      (n) => n ?? undefined,
+      () => undefined,
+    )
+    primaryNames.set(key, name)
+  }
+  return name
+}
+
+/**
+ * Someone, as ENS shows them: their primary name with its identicon if they have one, else the
+ * address. Either way the address stays one hover, click (Blockscout) or copy away.
+ */
+export function Who(props: { ctx: Ctx; address: Address; chainId?: number; full?: boolean }) {
+  const [name, setName] = useState<string>()
+  useEffect(() => {
+    setName(undefined)
+    let cancelled = false
+    primaryName(props.ctx, props.address).then((n) => !cancelled && setName(n))
+    return () => {
+      cancelled = true
+    }
+  }, [props.ctx, props.address])
+  if (!name) return <Addr address={props.address} chainId={props.chainId} full={props.full} />
+  const base = BLOCKSCOUT[props.chainId ?? 1]
+  return (
+    <span class="hash who" title={props.address}>
+      <Avatar seed={name} size={16} />
+      {base ? (
+        <a class="ext" href={`${base}/address/${props.address}`} target="_blank" rel="noopener noreferrer">
+          {name}
+        </a>
+      ) : (
+        <span>{name}</span>
       )}
       <CopyButton value={props.address} />
     </span>

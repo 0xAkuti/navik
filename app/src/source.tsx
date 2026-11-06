@@ -5,7 +5,7 @@ import type { Address, EIP1193Provider } from 'viem'
 
 import { arkivRead, entityUrl, onArkiv, sendArkiv } from './arkiv.ts'
 import { ARKIV_CHAIN_ID, networkById, useReads } from './reads.ts'
-import { Addr, Badge, Hash, Icon, Mono, Spinner } from './ui.tsx'
+import { Badge, Hash, Icon, Mono, Spinner, Who } from './ui.tsx'
 
 export type Wallet = { provider: EIP1193Provider; account: Address }
 export type Compared = { file: string; cmp: navik.BuildComparison }
@@ -107,11 +107,11 @@ export function SourcePanel(props: { ctx: navik.Ctx; v: navik.Verification; isol
           <ul class="checks">
             {p ? (
               <Check ok>
-                Provenance recorded on Arkiv by the publisher <Addr address={p.creator} chainId={chainId} />
+                Provenance recorded on Arkiv by the publisher <Who ctx={ctx} address={p.creator} chainId={chainId} />
               </Check>
             ) : (
               <Check>
-                No provenance from {records.publisher ? <>the publisher <Addr address={records.publisher} chainId={chainId} /></> : 'a known publisher'}
+                No provenance from {records.publisher ? <>the publisher <Who ctx={ctx} address={records.publisher} chainId={chainId} /></> : 'a known publisher'}
                 {ignored > 0 && `; ${ignored} record${ignored === 1 ? '' : 's'} by other accounts ignored`}
               </Check>
             )}
@@ -179,7 +179,7 @@ export function SourcePanel(props: { ctx: navik.Ctx; v: navik.Verification; isol
               {records.attestations.map((a) => (
                 <li key={a.key} class={a.result === 'match' ? '' : 'error'}>
                   <Icon name={a.result === 'match' ? 'check' : 'x'} size={14} />
-                  <Addr address={a.creator} chainId={ARKIV_CHAIN_ID} />
+                  <Who ctx={ctx} address={a.creator} chainId={ARKIV_CHAIN_ID} />
                   <span class="muted small">
                     {a.commit ? `@ ${a.commit.slice(0, 8)} ` : ''}via {a.tool}
                   </span>

@@ -337,3 +337,4 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .domain-steps li.done .step-mark { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
 .domain-check { margin-top: 12px; padding: 16px 18px; }
 .domain-check p { margin: 0 0 12px; }
+.who { gap: 4px; }
