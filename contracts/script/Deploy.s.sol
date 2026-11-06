@@ -47,6 +47,7 @@ contract Deploy is Script {
         vm.serializeAddress(k, "registry", address(n.registry));
         vm.serializeAddress(k, "factory", address(n.factory));
         vm.serializeAddress(k, "resolver", address(n.resolver));
+        vm.serializeAddress(k, "pages", address(n.pages));
         vm.serializeAddress(k, "ethRegistry", ENSv2Mainnet.ETH_REGISTRY);
         string memory json = vm.serializeAddress(k, "universalResolver", ENSv2Mainnet.UNIVERSAL_RESOLVER);
         string memory dir = string.concat(vm.projectRoot(), "/deployments/");

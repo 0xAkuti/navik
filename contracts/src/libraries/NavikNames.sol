@@ -50,6 +50,24 @@ library NavikNames {
         return keccak256(abi.encodePacked(namehash(name, next), keccak256(label)));
     }
 
+    /// DNS-encodes a dotted name (`app.navik.eth`).
+    function dnsEncode(string memory name) internal pure returns (bytes memory dns) {
+        bytes memory b = bytes(name);
+        dns = new bytes(b.length + 2);
+        uint256 start;
+        for (uint256 i; i <= b.length; ++i) {
+            if (i < b.length && b[i] != ".") {
+                dns[i + 1] = b[i];
+                continue;
+            }
+            uint256 length = i - start;
+            if (length == 0 || length > 255) revert InvalidName();
+            // forge-lint: disable-next-line(unsafe-typecast) checked above
+            dns[start] = bytes1(uint8(length));
+            start = i + 1;
+        }
+    }
+
     /// DNS-encodes a single label followed by an already DNS-encoded parent.
     function dnsEncode(string memory label, bytes memory parentDns) internal pure returns (bytes memory) {
         bytes memory b = bytes(label);

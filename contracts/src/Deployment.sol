@@ -7,6 +7,7 @@ import {SSTORE2} from "solady/utils/SSTORE2.sol";
 
 import {IExtendedResolver} from "./interfaces/IENSv2.sol";
 import {NavikChunks} from "./libraries/NavikChunks.sol";
+import {NavikHooks} from "./libraries/NavikHooks.sol";
 
 /// ERC-8244 contract-hosted app: one immutable release of a Navik project.
 ///
@@ -18,7 +19,8 @@ import {NavikChunks} from "./libraries/NavikChunks.sol";
 ///
 /// Each release is also the ENS resolver of its own name (`<N>.<project>.navik.eth`): it answers
 /// `contentcontract` and `addr` with its own address, whatever name it is reached through (for
-/// example `<N>.alice.eth` when alice.eth shares the project's registry).
+/// example `<N>.alice.eth` when alice.eth shares the project's registry), and `contenthash` with
+/// a hook on its own `page()`, so gateways like eth.limo can serve it.
 contract Deployment is IExtendedResolver {
     error UnsupportedResolverProfile(bytes4 selector);
 
@@ -26,6 +28,7 @@ contract Deployment is IExtendedResolver {
     bytes4 private constant ADDR = 0x3b3b57de; // addr(bytes32)
     bytes4 private constant ADDR_COIN = 0xf1cb7e06; // addr(bytes32,uint256)
     bytes4 private constant TEXT = 0x59d1d43c; // text(bytes32,string)
+    bytes4 private constant CONTENTHASH = 0xbc1c58d1; // contenthash(bytes32)
     bytes4 private constant MULTICALL = 0xac9650d8; // multicall(bytes[])
     uint256 private constant COIN_TYPE_ETH = 60;
 
@@ -38,6 +41,11 @@ contract Deployment is IExtendedResolver {
     /// ERC-8244: the full HTML document.
     function html() external view returns (string memory) {
         return string(NavikChunks.read(pointers()));
+    }
+
+    /// The document as a data URL, for gateways that follow `contenthash` hooks (ERC-8121).
+    function page() external view returns (bytes memory) {
+        return NavikHooks.dataUrl(NavikChunks.read(pointers()));
     }
 
     /// Number of chunks; with `chunk(i)`, lets clients page through large documents when an
@@ -91,7 +99,7 @@ contract Deployment is IExtendedResolver {
 
     function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
         return interfaceId == type(IExtendedResolver).interfaceId || interfaceId == 0x01ffc9a7 // ERC-165
-            || interfaceId == ADDR || interfaceId == ADDR_COIN || interfaceId == TEXT;
+            || interfaceId == ADDR || interfaceId == ADDR_COIN || interfaceId == TEXT || interfaceId == CONTENTHASH;
     }
 
     /// ENSIP-10: answers any name served by this resolver.
@@ -105,7 +113,7 @@ contract Deployment is IExtendedResolver {
             }
             return abi.encode(calls);
         }
-        if (selector == ADDR || selector == ADDR_COIN || selector == TEXT) {
+        if (selector == ADDR || selector == ADDR_COIN || selector == TEXT || selector == CONTENTHASH) {
             (bool ok, bytes memory v) = address(this).staticcall(data);
             if (!ok) revert UnsupportedResolverProfile(selector);
             return v;
@@ -119,6 +127,10 @@ contract Deployment is IExtendedResolver {
 
     function addr(bytes32, uint256 coinType) external view returns (bytes memory) {
         return coinType == COIN_TYPE_ETH ? abi.encodePacked(address(this)) : bytes("");
+    }
+
+    function contenthash(bytes32) external view returns (bytes memory) {
+        return NavikHooks.contenthash("page()", "page()", address(this));
     }
 
     /// `contentcontract` (ERC-8244), plus `navik.version` and `navik.contenthash`.

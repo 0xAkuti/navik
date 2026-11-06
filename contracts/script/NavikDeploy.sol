@@ -4,6 +4,7 @@ pragma solidity ^0.8.25;
 import {ENSv2Roles, IPermissionedRegistry, IVerifiableFactory} from "../src/interfaces/IENSv2.sol";
 import {NavikNames} from "../src/libraries/NavikNames.sol";
 import {NavikFactory} from "../src/NavikFactory.sol";
+import {IUniversalResolver, NavikPages} from "../src/NavikPages.sol";
 import {NavikRegistrar} from "../src/NavikRegistrar.sol";
 import {NavikResolver} from "../src/NavikResolver.sol";
 
@@ -14,6 +15,7 @@ struct Navik {
     IPermissionedRegistry registry;
     NavikFactory factory;
     NavikResolver resolver;
+    NavikPages pages;
     bytes32 rootNode;
 }
 
@@ -32,6 +34,7 @@ library NavikDeploy {
         returns (Navik memory n)
     {
         n.rootNode = NavikNames.node(ETH_NODE, rootLabel);
+        n.pages = new NavikPages(IUniversalResolver(ENSv2Mainnet.UNIVERSAL_RESOLVER));
         n.registrar = new NavikRegistrar(
             IVerifiableFactory(ENSv2Mainnet.VERIFIABLE_FACTORY),
             ENSv2Mainnet.USER_REGISTRY_IMPL,
@@ -40,7 +43,8 @@ library NavikDeploy {
             rootLabel,
             n.rootNode,
             rootProject,
-            rootProjectOwner
+            rootProjectOwner,
+            address(n.pages)
         );
         n.registry = n.registrar.REGISTRY();
         n.factory = n.registrar.FACTORY();

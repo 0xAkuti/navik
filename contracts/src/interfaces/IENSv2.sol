@@ -51,11 +51,13 @@ interface IPermissionedResolver {
     function initialize(Grant[] calldata grants, bytes[] calldata calls) external;
     function setText(bytes calldata name, string calldata key, string calldata value) external;
     function setAddress(bytes calldata name, uint256 coinType, bytes calldata addressBytes) external;
+    function setContenthash(bytes calldata name, bytes calldata hash) external;
     function grantSetterRoles(bytes calldata setter, address account) external returns (bool);
     function revokeRoles(uint256 resource, uint256 roleBitmap, address account) external returns (bool);
     function hasRoles(uint256 resource, uint256 roleBitmap, address account) external view returns (bool);
     function linkToNode(bytes calldata sourceName, bytes32 targetNode) external;
     function text(bytes32 node, string calldata key) external view returns (string memory);
+    function contenthash(bytes32 node) external view returns (bytes memory);
 }
 
 interface IVerifiableFactory {
