@@ -1,9 +1,11 @@
 // Bundles the CLI into one file (dist/navik.js) for npm and the GitHub Action: no workspace, no
 // TypeScript at runtime. Public Navik deployments are embedded, so it works outside this repo;
-// local forks (31337) are not. Playwright stays external: only --smoke needs it.
+// local forks (31337) are not. Playwright stays external: only --smoke and --anon need it.
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { build } from 'rolldown'
+
+import { buildAnonPage } from './src/anon-build.ts'
 
 const dir = resolve(import.meta.dirname, '../contracts/deployments')
 const deployments = Object.fromEntries(
@@ -22,6 +24,7 @@ await build({
     define: {
       __NAVIK_DEPLOYMENTS__: JSON.stringify(deployments),
       __NAVIK_CLI_VERSION__: JSON.stringify(version),
+      __NAVIK_ANON_PAGE__: JSON.stringify(await buildAnonPage()),
     },
   },
   output: { file: resolve(import.meta.dirname, 'dist/navik.js'), format: 'esm', codeSplitting: false },

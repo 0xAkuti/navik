@@ -8,6 +8,7 @@ import * as navik from '@navik/sdk'
 import { type Address, concat as concatBytes, formatGwei, getAddress, type Hex, isAddress, parseGwei } from 'viem'
 import { getGasPrice } from 'viem/actions'
 
+import { closeAnon } from './anon.ts'
 import { ciRunUrl, type DeployResult, reportReproductionToGitHub, reportToGitHub } from './ci.ts'
 import { type GlobalOptions, loadArkiv, loadArkivWriter, loadCtx, swarmApi, swarmBatch } from './config.ts'
 import { buildSite, describePack, findConfig, readSite, recordedBuild, shouldCompress } from './site.ts'
@@ -21,7 +22,13 @@ const program = new Command()
   .name('navik')
   .version(typeof __NAVIK_CLI_VERSION__ === 'undefined' ? 'dev' : __NAVIK_CLI_VERSION__)
   .description('Deploy fully onchain websites to <project>.navik.eth (ENSv2 + ERC-8244)')
-  .option('--rpc <url>', 'JSON-RPC endpoint (env RPC_URL, default http://127.0.0.1:8545)')
+  .option('--rpc <url>', 'JSON-RPC endpoint (env RPC_URL, default http://127.0.0.1:8545; with --anon, a public RPC)')
+  .option('--anon', 'send every RPC request through anon-rpc, in headless Chromium (needs Playwright)')
+  .addOption(
+    new Option('--anon-network <network>', 'anon-rpc network, implies --anon (env NAVIK_ANON, default nym)').choices(
+      navik.NETWORKS.map((n) => n.id),
+    ),
+  )
   .option('--deployment <file>', 'Navik deployment JSON (env NAVIK_DEPLOYMENT, default contracts/deployments/<chainId>.json)')
 
 const ctx = () => loadCtx(program.opts<GlobalOptions>())
@@ -652,7 +659,10 @@ function tick(ok: boolean) {
   return ok ? '✓' : '✗'
 }
 
-program.parseAsync().catch((err: unknown) => {
-  console.error(`error: ${navik.describeError(err)}`)
-  process.exit(1)
-})
+await program
+  .parseAsync()
+  .catch((err: unknown) => {
+    console.error(`error: ${navik.describeError(err)}`)
+    process.exitCode = 1
+  })
+  .finally(closeAnon)

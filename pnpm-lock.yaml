@@ -47,6 +47,9 @@ importers:
 
   cli:
     devDependencies:
+      '@anon-rpc/browser-harness':
+        specifier: 0.4.0
+        version: 0.4.0
       '@navik/sdk':
         specifier: workspace:*
         version: link:../sdk
