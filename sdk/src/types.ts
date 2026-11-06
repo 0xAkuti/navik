@@ -11,6 +11,8 @@ export type NavikDeployment = {
   registry: Address
   factory: Address
   resolver: Address
+  /** NavikPages: serves project names to gateways like eth.limo. */
+  pages: Address
   ethRegistry: Address
   universalResolver: Address
 }
