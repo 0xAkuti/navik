@@ -2,8 +2,9 @@
 # Full test run on a fresh local mainnet fork (real ENSv2 state):
 #   contracts (unit + fork tests) → typecheck + SDK tests → fork with Navik deployed → CLI flow →
 #   dashboard in headless Chromium → dashboard published to navik.eth → rebuilt from source and
-#   compared byte for byte → dashboard e2e against the exact bytes navik.eth serves → freeze
-#   navik.eth (in a snapshot, reverted afterwards).
+#   compared byte for byte → dashboard e2e against the exact bytes navik.eth serves, and through
+#   a replica of eth.limo → freeze navik.eth (in a snapshot, reverted
+#   afterwards).
 # Leaves the fork running on :8545 for manual testing; stop it with `kill $(cat .anvil.pid)`.
 # Needs: Foundry, Node >= 22.18, pnpm, and `pnpm install` + `pnpm -C app exec playwright install chromium`.
 set -euo pipefail
@@ -54,6 +55,15 @@ node cli/src/cli.ts verify navik.eth --against "$WORK/rebuild/index.html"
 step "dashboard e2e against the exact bytes navik.eth serves"
 node cli/src/cli.ts verify navik.eth --raw --out "$WORK/navik.html"
 (cd app && APP_FILE="$WORK/navik.html" node test/e2e.ts)
+
+step "dashboard e2e through eth.limo's libraries, from a real origin, as navik.eth.limo serves it"
+npm --prefix cli/test/gateway install --silent --no-audit --no-fund
+node cli/test/gateway/server.ts "$RPC_URL" 8588 &
+GATEWAY=$!
+trap 'kill $GATEWAY 2>/dev/null' EXIT
+(cd app && APP_URL=http://navik.eth.localhost:8588/ node test/e2e.ts)
+kill $GATEWAY
+trap - EXIT
 
 step "freeze navik.eth (inside a snapshot): nobody can repoint it, everything keeps working"
 SNAPSHOT=$(cast rpc evm_snapshot --rpc-url "$RPC_URL" | tr -d '"')

@@ -17,7 +17,8 @@ const ALICE = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8' // anvil #1
 const CI = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC' // anvil #2
 const VITALIK = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045' // primary name vitalik.eth on mainnet, so on the fork
 // APP_FILE: e.g. the copy of the app fetched from Ethereum with `navik open navik.eth`
-const APP = pathToFileURL(process.env.APP_FILE ?? resolve(import.meta.dirname, '../dist/index.html')).href
+// APP_URL: e.g. the app through a gateway (cli/test/gateway), as navik.eth.limo serves it
+const APP = process.env.APP_URL ?? pathToFileURL(process.env.APP_FILE ?? resolve(import.meta.dirname, '../dist/index.html')).href
 const SHOTS = process.env.SHOTS ?? '/tmp/navik-app'
 
 const project = `web${Date.now().toString(36)}`
@@ -146,7 +147,7 @@ const page = await browser.newPage()
 const external: string[] = []
 page.on('request', (r) => {
   const url = r.url()
-  if (!/^(file:|data:|blob:|about:)/.test(url) && ![RPC, WORKER_BUNDLE, ARKIV_RPC].some((u) => url.startsWith(u))) external.push(url)
+  if (!/^(file:|data:|blob:|about:)/.test(url) && ![APP, RPC, WORKER_BUNDLE, ARKIV_RPC].some((u) => url.startsWith(u))) external.push(url)
 })
 page.on('pageerror', (e) => console.error('page error:', e.message))
 await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
