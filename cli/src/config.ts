@@ -17,7 +17,7 @@ import {
   PUBLIC_RPCS,
   PUBLIC_SWARM_GATEWAY,
 } from '@navik/sdk'
-import { type Chain, createPublicClient, createWalletClient, type Hex, http, type Transport } from 'viem'
+import { type Address, type Chain, createPublicClient, createWalletClient, type Hex, http, type Transport } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { mainnet } from 'viem/chains'
 
@@ -88,8 +88,19 @@ export function loadArkiv(): ArkivRead {
   return arkivReader(arkivTransport(), arkivChain(process.env.ARKIV_ACCESS_KEY ?? ''))
 }
 
+const arkivKey = () => (process.env.ARKIV_PRIVATE_KEY ?? process.env.PRIVATE_KEY) as Hex | undefined
+
+/** The address that would sign Arkiv writes, if any key is set. */
+export function arkivAccount(): Address | undefined {
+  const key = arkivKey()
+  return key && privateKeyToAccount(key).address
+}
+
+/** Whether this run asked for anonymized reads. */
+export const anonymized = () => !!anon
+
 export function loadArkivWriter(): ArkivWrite {
-  const key = (process.env.ARKIV_PRIVATE_KEY ?? process.env.PRIVATE_KEY) as Hex | undefined
+  const key = arkivKey()
   if (!key) throw new Error('set ARKIV_PRIVATE_KEY or PRIVATE_KEY (with tGLM on Arkiv) to write to Arkiv')
   return arkivWriter(arkivTransport(), privateKeyToAccount(key), arkivChain(process.env.ARKIV_ACCESS_KEY ?? ''))
 }

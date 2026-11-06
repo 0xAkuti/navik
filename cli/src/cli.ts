@@ -6,14 +6,14 @@ import { pathToFileURL } from 'node:url'
 import { Command, Option } from 'commander'
 import * as navik from '@navik/sdk'
 import { type Address, concat as concatBytes, formatGwei, getAddress, type Hex, isAddress, parseGwei } from 'viem'
-import { getGasPrice } from 'viem/actions'
+import { getBalance, getGasPrice } from 'viem/actions'
 
 import { closeAnon } from './anon.ts'
 import { ciRunUrl, type DeployResult, reportReproductionToGitHub, reportToGitHub } from './ci.ts'
-import { type GlobalOptions, loadArkiv, loadArkivWriter, loadCtx, swarmApi, swarmBatch } from './config.ts'
-import { buildSite, describePack, findConfig, readSite, recordedBuild, shouldCompress } from './site.ts'
+import { anonymized, arkivAccount, type GlobalOptions, loadArkiv, loadArkivWriter, loadCtx, swarmApi, swarmBatch } from './config.ts'
+import { buildSite, describePack, findConfig, type LoadedConfig, readSite, recordedBuild, shouldCompress } from './site.ts'
 import { describeSmoke, smoke } from './smoke.ts'
-import { extractTar, gitArchive, gitCheckout, type GitSource, gitSource, runBuild, tarCommit } from './source.ts'
+import { extractTar, gitArchive, gitCheckout, type GitSource, gitSource, isPublicRepo, runBuild, tarCommit } from './source.ts'
 
 /** Set by bundle.ts; running from source reports "dev". */
 declare const __NAVIK_CLI_VERSION__: string | undefined
@@ -130,7 +130,8 @@ program
   .option('--max-gas-price <gwei>', 'abort if gas is more expensive than this')
   .option('--dry-run', 'print the plan only')
   .option('--json', 'print the result as JSON on stdout (the log goes to stderr)')
-  .option('--provenance', 'with navik.json: record on Arkiv which commit and build command produced the release')
+  .option('--provenance', 'with navik.json: require recording the commit and build command on Arkiv (default: record it when possible)')
+  .option('--no-provenance', 'do not record provenance')
   .option('--build <command>', 'with <path>: record provenance on Arkiv: the command (run at the repo root) that built <path>')
   .option('--repo <url>', 'with provenance: public URL of the source repo (default: the origin remote)')
   .option('--swarm', 'with provenance: also put the source (git archive of the commit) on Swarm')
@@ -139,16 +140,16 @@ program
     if (opts.json) console.log = console.error
     const config = path ? undefined : findConfig()
     if (!path && !config) throw new Error('nothing to deploy: pass <project> <path>, or run where a navik.json is')
-    if (config && opts.build) throw new Error('--build is for deploying a <path>; with navik.json, use --provenance')
+    if (config && opts.build) throw new Error('--build is for deploying a <path>; navik.json already names the build command')
     if (path && opts.provenance) throw new Error('--provenance reads navik.json; for a <path>, use --build <command>')
     const project = projectArg ?? config!.project
     const c = await ctx()
 
     if (config && !opts.skipBuild) buildSite(config)
     const target = config ? resolve(config.dir, config.output) : path!
-    // fail before spending gas: a dirty tree or an oversized field cannot become provenance
-    const source = config && opts.provenance ? gitSource(target, opts.repo) : opts.build ? gitSource(target, opts.repo) : undefined
-    const build = source && (config ? recordedBuild(config, source.root) : opts.build!)
+    // provenance that was asked for fails before spending gas; by default it never blocks a deploy
+    const auto = !!config && opts.provenance === undefined
+    let source = opts.provenance || opts.build ? gitSource(target, opts.repo) : undefined
     const site = readSite(target)
     if (site.pack) for (const line of describePack(site.pack)) console.log(line)
     const compress = await shouldCompress(site, opts.compress ?? config?.compress)
@@ -173,6 +174,10 @@ program
       console.log(`address      ${plan.predicted} (known before upload)`)
       console.log(`transactions ${txs}${plan.singleTx ? ' (store + publish together)' : ''}`)
     }
+    if (auto && !unchanged) source = await autoSource(c, config!, target, opts.repo)
+    if (path && !opts.build && opts.provenance === undefined && !unchanged) skipProvenance('pass --build <command> to record it')
+    const build = source && (config ? recordedBuild(config, source.root) : opts.build!)
+    if (source && opts.dryRun) console.log(`provenance   would record ${source.repo} @ ${source.commit.slice(0, 12)}`)
     if (opts.smoke) await smokeOrFail(concatBytes(plan.chunks.map((ch) => ch.data)))
 
     const result: DeployResult = {
@@ -218,7 +223,12 @@ program
       result.limo = navik.limoUrl(c, result.production ?? result.release)
       if (result.limo) console.log(`open         ${result.limo}`)
       if (source && build && !unchanged) {
-        result.provenance = await recordSource(c, { name: plan.name, project: result.project, site: plan.predicted }, plan, source, build, opts)
+        try {
+          result.provenance = await recordSource(c, { name: plan.name, project: result.project, site: plan.predicted }, plan, source, build, opts)
+        } catch (err) {
+          if (!auto) throw err
+          skipProvenance(`${shortReason(err)}; retry with \`navik record\``)
+        }
       }
     }
     reportToGitHub(result)
@@ -590,6 +600,30 @@ type DeployOptions = {
   repo?: string
   swarm?: boolean
   notes?: string
+}
+
+const skipProvenance = (why: string) => console.log(`provenance   skipped: ${why}`)
+/** viem's short messages can span lines; a skip stays on one. */
+const shortReason = (err: unknown) => navik.describeError(err).split('\n')[0].replace(/(; commit them.*|\.)$/, '')
+
+/**
+ * The source to record by default, or undefined with a note saying why not. Arkiv is public and
+ * only the publisher's record counts, so this takes a public repo and the deploy key with tGLM.
+ */
+async function autoSource(c: navik.Ctx, config: LoadedConfig, target: string, repo?: string): Promise<GitSource | undefined> {
+  if (anonymized()) return void skipProvenance('checking the repo would leave --anon; pass --provenance to record it')
+  if (!config.build) return void skipProvenance('navik.json has no "build"')
+  const account = arkivAccount()
+  if (!account || !c.account) return void skipProvenance('no Arkiv key')
+  if (getAddress(account) !== getAddress(c.account)) return void skipProvenance('ARKIV_PRIVATE_KEY is not the deploy key, so clients would ignore the record')
+  try {
+    const source = gitSource(target, repo)
+    if (!isPublicRepo(source.repo)) return void skipProvenance(`${source.repo} is not a public https repo`)
+    if (!(await getBalance(loadArkiv(), { address: account }))) return void skipProvenance(`${account} has no tGLM on Arkiv`)
+    return source
+  } catch (err) {
+    skipProvenance(shortReason(err))
+  }
 }
 
 /** Uploads the source to Swarm (optional), then writes the release's provenance to Arkiv. */
