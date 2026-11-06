@@ -138,10 +138,41 @@ fails as "$MALLORY" claim "9.$PROJECT"
 navik resolve "9.$PROJECT" | grep -q "(none)" || { echo "9.$PROJECT should not resolve" >&2; exit 1; }
 echo "  9.$PROJECT.navik.eth does not exist yet"
 
+step "directory build: navik.json builds the viem + React example, packs dist/ and smoke-tests it"
+EXAMPLE="$ROOT_DIR/examples/viem-vite"
+VITE="${PROJECT}-vite"
+as "$ALICE" claim "$VITE" >/dev/null
+(cd "$EXAMPLE" && as "$ALICE" deploy "$VITE" --smoke --promote --json) > "$WORK/deploy.json" 2> "$WORK/out"
+grep -E "^(packed|compressed|smoke|release)" "$WORK/out"
+json() { node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1]));console.log(r[process.argv[2]])' "$1" "$2"; }
+[[ "$(json "$WORK/deploy.json" published)" == true && "$(json "$WORK/deploy.json" promoted)" == true ]] \
+  || { cat "$WORK/deploy.json"; echo "expected a published, promoted release" >&2; exit 1; }
+[[ "$(navik resolve "$VITE")" == *"$(json "$WORK/deploy.json" address)"* ]] || { echo "$VITE is not live" >&2; exit 1; }
+navik verify "$VITE" --against "$EXAMPLE/dist" | grep -q "dist is byte-identical to the original document"
+echo "  --against dist/: packing the build again gives the bytes production serves"
+
+step "CI re-runs: unchanged bytes publish nothing, and report it to GitHub Actions"
+export GITHUB_OUTPUT="$WORK/gh-output" GITHUB_STEP_SUMMARY="$WORK/gh-summary"
+(cd "$EXAMPLE" && as "$ALICE" deploy "$VITE" --skip-build --promote --json) > "$WORK/deploy.json" 2>/dev/null
+unset GITHUB_OUTPUT GITHUB_STEP_SUMMARY
+[[ "$(json "$WORK/deploy.json" unchanged)" == true && "$(json "$WORK/deploy.json" transactions)" == "[]" ]] \
+  || { cat "$WORK/deploy.json"; echo "expected no transactions" >&2; exit 1; }
+grep -q "^release=1.$VITE.navik.eth$" "$WORK/gh-output" && grep -q "^unchanged=true$" "$WORK/gh-output"
+grep -q "unchanged, nothing published" "$WORK/gh-summary"
+echo "  no transactions; step outputs and job summary written"
+(cd "$EXAMPLE" && fails as "$ALICE" deploy "$VITE" --skip-build --force --max-gas-price 0.000000001)
+
+step "a code-split build is rejected before anything is sent"
+mkdir -p "$WORK/split/assets"
+printf '<!doctype html><script type="module" src="/assets/index.js"></script>' > "$WORK/split/index.html"
+printf 'import("./page.js")' > "$WORK/split/assets/index.js"
+printf 'export default 1' > "$WORK/split/assets/page.js"
+fails as "$ALICE" deploy "$VITE" "$WORK/split"
+
 if [[ -n "${ARKIV_PRIVATE_KEY:-}" ]]; then
   # Writes go to Arkiv's testnet (Rabdi), so the key needs tGLM there; Swarm is a local stand-in
   # for the bee API (no postage batch needed).
-  step "provenance: deploy records its source on Arkiv and puts it on Swarm"
+  step "provenance: deploy builds from navik.json, records the source on Arkiv and puts it on Swarm"
   BUILDER=$ARKIV_PRIVATE_KEY
   BUILDER_ADDR=$(address "$BUILDER")
   cast rpc anvil_setBalance "$BUILDER_ADDR" 0x8ac7230489e80000 --rpc-url "$RPC_URL" >/dev/null
@@ -149,28 +180,31 @@ if [[ -n "${ARKIV_PRIVATE_KEY:-}" ]]; then
   SRC="$WORK/src"
   mkdir -p "$SRC"
   git -C "$SRC" init -q
-  printf '<!doctype html><title>%s</title><h1>built from source</h1>' "$PROJECT" > "$SRC/page.html"
-  git -C "$SRC" add page.html
+  printf '<!doctype html><title>%s</title><link rel="stylesheet" href="/assets/site.css"><h1>built from source</h1><script src="/assets/site.js"></script>' "$PROJECT" > "$SRC/page.html"
+  printf 'h1{color:teal}' > "$SRC/site.css"
+  printf 'document.title+=" ✓"' > "$SRC/site.js"
+  BUILD='mkdir -p dist/assets && cp page.html dist/index.html && cp site.css site.js dist/assets/'
+  printf '{"project":"%s","build":"%s","output":"dist"}' "$PROJECT" "$BUILD" > "$SRC/navik.json"
+  git -C "$SRC" add .
   git -C "$SRC" -c user.name=e2e -c user.email=e2e@navik.invalid commit -qm site
   git -C "$SRC" remote add origin "file://$SRC"
-  BUILD='mkdir -p dist && cp page.html dist/index.html'
-  (cd "$SRC" && bash -c "$BUILD")
   SWARM_PORT=18633
   node "$CLI_DIR/test/swarm-stub.ts" "$SWARM_PORT" >/dev/null &
   STUB=$!
   trap 'kill $STUB 2>/dev/null' EXIT
   sleep 0.5
   export SWARM_API="http://127.0.0.1:$SWARM_PORT" SWARM_BATCH="0x$(printf '0%.0s' {1..64})"
-  as "$BUILDER" deploy "$PROJECT" "$SRC/dist/index.html" --build "$BUILD" --swarm --notes "e2e $PROJECT" | tee "$WORK/out"
+  (cd "$SRC" && as "$BUILDER" deploy --provenance --swarm --notes "e2e $PROJECT") | tee "$WORK/out"
   RELEASE=$(awk '/^release/ {print $2}' "$WORK/out")
   grep -q "^provenance   file://$SRC @ " "$WORK/out"
 
   step "provenance is read back from Arkiv and trusted: its writer published the release"
   navik provenance "$RELEASE" | tee "$WORK/out"
   grep -q "written by $BUILDER_ADDR, the publisher" "$WORK/out"
+  grep -q "→  dist/$" "$WORK/out"
   grep -q "reproduced by 0 builder(s)" "$WORK/out"
 
-  step "reproduce from Swarm (hash-checked), rebuild, compare, attest"
+  step "reproduce from Swarm (hash-checked), rebuild, pack dist/, compare, attest"
   fails navik reproduce "$RELEASE"
   as "$BUILDER" reproduce "$RELEASE" --yes --attest | tee "$WORK/out"
   grep -q "keccak256 matches the provenance" "$WORK/out"
