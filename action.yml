@@ -42,7 +42,13 @@ inputs:
     description: With provenance, also put the source on Swarm (needs SWARM_API and SWARM_BATCH in env)
     default: 'false'
   arkiv-private-key:
-    description: Key that writes provenance to Arkiv (default private-key; provenance is only trusted from the publisher)
+    description: Key that writes provenance to Arkiv (default private-key; provenance is only trusted from the publisher), or attestations with reproduce
+    default: ''
+  reproduce:
+    description: >-
+      Instead of deploying, rebuild this name (e.g. 4.portfolio.navik.eth, or any ERC-8244 site with provenance) from its
+      recorded source and compare byte for byte; fails on a mismatch. With arkiv-private-key, attests the result on Arkiv,
+      linking this run's log. Needs no Ethereum key
     default: ''
 
 outputs:
@@ -73,6 +79,12 @@ outputs:
   provenance:
     description: Arkiv entity of the provenance record
     value: ${{ steps.navik.outputs.provenance }}
+  reproduced:
+    description: With reproduce, whether the rebuild is byte-identical
+    value: ${{ steps.navik.outputs.reproduced }}
+  attestation:
+    description: With reproduce, the Arkiv entity of the attestation
+    value: ${{ steps.navik.outputs.attestation }}
 
 runs:
   using: composite
@@ -85,7 +97,7 @@ runs:
         node cli/bundle.ts
 
     - name: Install Chromium for the smoke test
-      if: inputs.smoke == 'true' && inputs.promote-version == ''
+      if: inputs.smoke == 'true' && inputs.promote-version == '' && inputs.reproduce == ''
       shell: bash
       working-directory: ${{ github.action_path }}/cli
       run: npx --no-install playwright install --with-deps chromium
@@ -108,9 +120,16 @@ runs:
         MAX_GAS_PRICE: ${{ inputs.max-gas-price }}
         PROVENANCE: ${{ inputs.provenance }}
         SWARM: ${{ inputs.swarm }}
+        REPRODUCE: ${{ inputs.reproduce }}
       run: |
         [[ -n "$PRIVATE_KEY" ]] || unset PRIVATE_KEY
         [[ -n "$ARKIV_PRIVATE_KEY" ]] || unset ARKIV_PRIVATE_KEY
+        if [[ -n "$REPRODUCE" ]]; then
+          args=(--yes)
+          [[ -n "${ARKIV_PRIVATE_KEY:-}" ]] && args+=(--attest)
+          node "$NAVIK" reproduce "$REPRODUCE" "${args[@]}"
+          exit
+        fi
         if [[ -n "$PROMOTE_VERSION" ]]; then
           project=${PROJECT:-$(node "$NAVIK" config project)}
           node "$NAVIK" promote "$project" "v${PROMOTE_VERSION#v}"

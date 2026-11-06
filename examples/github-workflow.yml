@@ -3,13 +3,20 @@
 # Pull requests: build, pack, smoke-test and plan the release; nothing is sent.
 # main:          publish a release with a key that may only publish (preview.<project>.navik.eth follows it).
 #                Re-runs and commits that don't change the site publish nothing.
-# production:    after approval, promote that exact release with a key that may only promote.
+#                Records the commit and build command on Arkiv (provenance).
+# reproduce:     a fresh runner rebuilds that release from the recorded source and compares byte for byte;
+#                the result is attested on Arkiv, linking this run's log, and shows in every viewer.
+# production:    only if it reproduced, and after approval, promote that exact release with a key that may
+#                only promote.
 #
 # One-time setup, as the project owner:
-#   navik grant <project> <publish key address> --permission publish   → secret NAVIK_PUBLISH_KEY
+#   navik grant <project> <publish key address> --permission publish   → secret NAVIK_PUBLISH_KEY (+ tGLM on Arkiv)
 #   navik grant <project> <promote key address> --permission promote   → secret NAVIK_PROMOTE_KEY
+#   an attestation key with tGLM on Arkiv and no Ethereum permissions  → secret NAVIK_ATTEST_KEY
 #   a "production" environment with required reviewers, and an RPC_URL secret
 # A leaked CI key can ship releases under new names, but cannot change what the project serves.
+# The reproduce job works for any site with provenance: point it at a name you don't own (e.g. on a
+# schedule) to attest other people's releases.
 name: Navik
 
 on:
@@ -22,6 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.navik.outputs.version }}
+      release: ${{ steps.navik.outputs.release }}
+      published: ${{ steps.navik.outputs.published }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -38,10 +47,26 @@ jobs:
           max-gas-price: 3
           # record the commit and build command on Arkiv, so anyone can `navik reproduce` it
           # (the publish key needs tGLM on Arkiv; set ARKIV_ACCESS_KEY in env to avoid rate limits)
-          # provenance: ${{ github.event_name == 'push' }}
+          provenance: ${{ github.event_name == 'push' }}
+
+  reproduce:
+    needs: release
+    if: github.event_name == 'push' && needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: <org>/navik@main
+        with:
+          rpc-url: ${{ secrets.RPC_URL }}
+          reproduce: ${{ needs.release.outputs.release }}
+          arkiv-private-key: ${{ secrets.NAVIK_ATTEST_KEY }}
 
   production:
-    needs: release
+    needs: [release, reproduce]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     environment: production
