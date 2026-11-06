@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Full test run on a fresh local mainnet fork (real ENSv2 state):
-#   contracts (unit + fork tests) → typecheck → fork with Navik deployed → CLI flow →
+#   contracts (unit + fork tests) → typecheck + SDK tests → fork with Navik deployed → CLI flow →
 #   dashboard in headless Chromium → dashboard published to navik.eth → rebuilt from source and
 #   compared byte for byte → dashboard e2e against the exact bytes navik.eth serves → freeze
 #   navik.eth (in a snapshot, reverted afterwards).
@@ -30,8 +30,9 @@ rm -f contracts/deployments/31337*.json
 step "contracts: unit and mainnet fork tests"
 (cd contracts && forge test)
 
-step "typecheck sdk, cli and app"
+step "typecheck sdk, cli, app and examples; SDK unit tests"
 pnpm -r run typecheck
+pnpm -C sdk test
 
 step "fresh anvil fork: navik.eth registered, Navik deployed and attached"
 ./scripts/dev-fork.sh >/dev/null
