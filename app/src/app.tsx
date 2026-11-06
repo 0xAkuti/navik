@@ -304,35 +304,50 @@ function Landing(props: { onConnect: () => void; root: string }) {
         </div>
       </section>
 
-      <svg class="horizon" viewBox="0 0 1000 36" preserveAspectRatio="none" aria-hidden="true">
-        <path d="M0 35C300-11 700-11 1000 35" />
-      </svg>
-      <section class="features">
-        <div class="feature">
-          <span class="feature-icon">
-            <Icon name="layers" size={18} />
+      <section class="sea">
+        <div class="waves" aria-hidden="true">
+          <svg class="wave far" viewBox="0 0 800 96" preserveAspectRatio="none">
+            <path d="M0 40Q100 8 200 40T400 40 600 40 800 40V96H0z" />
+          </svg>
+          <svg class="wave near" viewBox="0 0 800 96" preserveAspectRatio="none">
+            <path d="M0 56Q100 24 200 56T400 56 600 56 800 56V96H0z" />
+          </svg>
+          <span class="boat">
+            <Logo size={72} />
           </span>
-          <div>
-            <h3>Immutable</h3>
-            <p>Every release is a contract.</p>
-          </div>
+          <svg class="wave front" viewBox="0 0 1200 96" preserveAspectRatio="none">
+            <path d="M0 62C160 84 300 84 470 66S800 34 960 58 1120 80 1200 66V96H0z" />
+          </svg>
         </div>
-        <div class="feature">
-          <span class="feature-icon">
-            <Icon name="globe" size={18} />
-          </span>
-          <div>
-            <h3>Versioned</h3>
-            <p>Permanent names, instant rollback.</p>
-          </div>
-        </div>
-        <div class="feature">
-          <span class="feature-icon">
-            <Icon name="shield" size={18} />
-          </span>
-          <div>
-            <h3>Private</h3>
-            <p>Reads go through a mixnet.</p>
+        <div class="deep">
+          <div class="features">
+            <div class="feature">
+              <span class="feature-icon">
+                <Icon name="layers" size={18} />
+              </span>
+              <div>
+                <h3>Immutable</h3>
+                <p>Every release is a contract.</p>
+              </div>
+            </div>
+            <div class="feature">
+              <span class="feature-icon">
+                <Icon name="globe" size={18} />
+              </span>
+              <div>
+                <h3>Versioned</h3>
+                <p>Permanent names, instant rollback.</p>
+              </div>
+            </div>
+            <div class="feature">
+              <span class="feature-icon">
+                <Icon name="shield" size={18} />
+              </span>
+              <div>
+                <h3>Private</h3>
+                <p>Reads go through a mixnet.</p>
+              </div>
+            </div>
           </div>
         </div>
       </section>
