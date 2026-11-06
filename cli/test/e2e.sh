@@ -254,6 +254,35 @@ printf 'import("./page.js")' > "$WORK/split/assets/index.js"
 printf 'export default 1' > "$WORK/split/assets/page.js"
 fails as "$ALICE" deploy "$VITE" "$WORK/split"
 
+step "provenance by default: a note when it cannot be recorded, and the deploy still goes through"
+AUTO="${PROJECT}a"
+as "$ALICE" claim "$AUTO"
+AUTO_SRC="$WORK/auto"
+mkdir -p "$AUTO_SRC"
+git -C "$AUTO_SRC" init -q
+printf '/dist\n' > "$AUTO_SRC/.gitignore"
+printf '<!doctype html><title>%s</title><h1>one</h1>' "$AUTO" > "$AUTO_SRC/page.html"
+printf '{"project":"%s","build":"mkdir -p dist && cp page.html dist/index.html","output":"dist/index.html"}' "$AUTO" > "$AUTO_SRC/navik.json"
+git -C "$AUTO_SRC" add .
+git -C "$AUTO_SRC" -c user.name=e2e -c user.email=e2e@navik.invalid commit -qm site
+git -C "$AUTO_SRC" remote add origin "file://$AUTO_SRC"
+auto() { (cd "$AUTO_SRC" && ARKIV_PRIVATE_KEY=$ALICE as "$ALICE" deploy "$@"); }
+auto | tee "$WORK/out"
+grep -q '^provenance   skipped: file://.* is not a public https repo$' "$WORK/out"
+grep -q '^published' "$WORK/out"
+printf '<h1>two</h1>' >> "$AUTO_SRC/page.html"
+auto | tee "$WORK/out"
+grep -q '^provenance   skipped: .* has uncommitted changes$' "$WORK/out"
+grep -q '^published' "$WORK/out"
+fails auto --provenance
+grep -q 'uncommitted changes' "$WORK/out"
+printf '<h1>three</h1>' >> "$AUTO_SRC/page.html"
+auto --no-provenance | tee "$WORK/out"
+if grep -q '^provenance' "$WORK/out"; then echo 'expected no provenance line' >&2; exit 1; fi
+grep -q '^published' "$WORK/out"
+as "$ALICE" deploy "$AUTO" "$WORK/v1.html" | tee "$WORK/out"
+grep -q '^provenance   skipped: pass --build' "$WORK/out"
+
 if [[ -n "${ARKIV_PRIVATE_KEY:-}" ]]; then
   # Writes go to Arkiv's testnet (Rabdi), so the key needs tGLM there; Swarm is a local stand-in
   # for the bee API (no postage batch needed).
