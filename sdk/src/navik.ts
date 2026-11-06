@@ -34,7 +34,7 @@ import {
   textResolverAbi,
   universalResolverAbi,
 } from './abi.ts'
-import { unwrapCompressed, wrapCompressed } from './compress.ts'
+import { type InlinedAsset, storedLayout, unwrapCompressed } from './compress.ts'
 import { type Ctx, requireWallet } from './types.ts'
 import { dnsEncode, isValidProjectLabel, parseContentContract, textResource } from './names.ts'
 
@@ -342,11 +342,12 @@ export type PublishPlan = {
   predicted: Address
   name: string
   maxSize: number
-  /** Set when the site is stored gzip-wrapped (see compress.ts). */
-  compressed?: { originalSize: number; originalChunks: number }
+  /** Set when the site is stored gzip-wrapped (see compress.ts); `segments`: assets in chunks of their own. */
+  compressed?: { originalSize: number; originalChunks: number; segments: number }
 }
 
-export type PlanOptions = { compress?: boolean }
+/** `assets`: what packSite inlined; with `compress`, large ones are stored in chunks of their own. */
+export type PlanOptions = { compress?: boolean; assets?: InlinedAsset[] }
 
 export async function planPublish(
   ctx: Ctx,
@@ -360,16 +361,22 @@ export async function planPublish(
   ).map(Number)
   const maxSize = chunkSize * maxChunks
   if (input.length === 0) throw new Error('empty site')
-  const bytes = opts.compress ? await wrapCompressed(input) : input
+  const { bytes, regions, segments } = await storedLayout(input, opts)
   if (bytes.length > maxSize) throw new Error(`site is ${bytes.length} bytes; the limit is ${maxSize}`)
 
+  // chunks never span two regions, so a segment's chunks depend on its bytes alone
   const chunks: PlannedChunk[] = []
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const data = bytes.subarray(i, i + chunkSize)
-    const pointer = await read<Address>(ctx, f, factoryAbi, 'chunkPointer', [toHex(data)])
-    const code = await getCode(ctx.publicClient, { address: pointer })
-    chunks.push({ data, pointer, stored: code !== undefined && code !== '0x' })
+  let start = 0
+  for (const length of regions) {
+    for (let i = start; i < start + length; i += chunkSize) {
+      const data = bytes.subarray(i, Math.min(i + chunkSize, start + length))
+      const pointer = await read<Address>(ctx, f, factoryAbi, 'chunkPointer', [toHex(data)])
+      const code = await getCode(ctx.publicClient, { address: pointer })
+      chunks.push({ data, pointer, stored: code !== undefined && code !== '0x' })
+    }
+    start += length
   }
+  if (chunks.length > maxChunks) throw new Error(`site needs ${chunks.length} chunks; the limit is ${maxChunks}`)
   const missing = chunks.filter((c) => !c.stored).map((c) => c.data)
   const uploads: Uint8Array[][] = []
   for (let i = 0; i < missing.length; i += CHUNKS_PER_TX) uploads.push(missing.slice(i, i + CHUNKS_PER_TX))
@@ -391,7 +398,7 @@ export async function planPublish(
     name: releaseName(ctx, project, version),
     maxSize,
     compressed: opts.compress
-      ? { originalSize: input.length, originalChunks: Math.ceil(input.length / chunkSize) }
+      ? { originalSize: input.length, originalChunks: Math.ceil(input.length / chunkSize), segments }
       : undefined,
   }
 }

@@ -12,8 +12,13 @@
 
 export type SiteFiles = Record<string, Uint8Array>
 
+/** A file the document references as a data URI: `data:${type};base64,${base64(bytes)}`. */
+export type PackedAsset = { path: string; type: string; bytes: Uint8Array }
+
 export type PackResult = {
   html: Uint8Array
+  /** files inlined as data URIs; storage can keep them in chunks of their own (see compress.ts) */
+  assets: PackedAsset[]
   /** files inlined into the document, in the order they were first used */
   inlined: string[]
   /** files in the build that nothing references; they are not part of the release */
@@ -102,6 +107,7 @@ export function packSite(files: SiteFiles, entry = 'index.html'): PackResult {
   const inlined: string[] = []
   const used = new Set<string>([entry])
   const uris = new Map<string, string>()
+  const assets: PackedAsset[] = []
   const resolving: string[] = []
 
   /** The build file `ref` (as written inside `from`) points to, if any. */
@@ -183,6 +189,7 @@ export function packSite(files: SiteFiles, entry = 'index.html'): PackResult {
       const bytes = TEXT.has(ext(path)) ? new TextEncoder().encode(content(path)) : files[path]
       uri = `data:${type};base64,${toBase64(bytes)}`
       uris.set(path, uri)
+      assets.push({ path, type, bytes })
     }
     return uri
   }
@@ -225,5 +232,5 @@ export function packSite(files: SiteFiles, entry = 'index.html'): PackResult {
   if (problems.some((p) => p.endsWith('(a code-split chunk)'))) problems.push(SPLIT_HINT)
   if (problems.length) throw new PackError([...new Set(problems)])
   const unused = paths.filter((p) => !used.has(p) && !IGNORED.test(p))
-  return { html: new TextEncoder().encode(html), inlined, unused }
+  return { html: new TextEncoder().encode(html), assets, inlined, unused }
 }
