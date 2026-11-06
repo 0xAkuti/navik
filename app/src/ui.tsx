@@ -39,6 +39,8 @@ const ICONS = {
   lock: 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3',
   chevron: 'm9 6 6 6-6 6',
   copy: 'M9 8h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1zM5 16V5a1 1 0 0 1 1-1h10',
+  info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11.5V16M12 8h.01',
+  eth: 'M12 3 6 12.5l6 3.5 6-3.5L12 3zM6.5 15.5 12 21l5.5-5.5',
 } as const
 
 export function Icon(props: { name: keyof typeof ICONS; size?: number }) {
@@ -50,14 +52,46 @@ export function Icon(props: { name: keyof typeof ICONS; size?: number }) {
   )
 }
 
-/** Navik's mark: a release stack pointing up, in ENS blue. */
+/** Navik's mark: a sail above the horizon. */
 export function Logo(props: { size?: number }) {
-  const s = props.size ?? 22
+  const s = props.size ?? 24
   return (
-    <svg width={s} height={s} viewBox="0 0 32 32" aria-hidden="true">
-      <rect width="32" height="32" rx="9" fill="var(--accent)" />
-      <path d="M9 19.5 16 12l7 7.5M9 24.5h14" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" />
+    <svg width={s} height={s} viewBox="0 8 512 512" aria-hidden="true">
+      <path fill="var(--mark)" d="M59.7 396.48 271.46 54.72v268.13c-73.12 9.21-151.4 35.4-211.76 73.63z" />
+      <path fill="#f5a623" d="M295.05 112.38 431.86 338.82C396.56 321.89 347.89 316.43 295.05 320.46z" />
+      <path fill="var(--mark)" d="M12 466.19C174.67 345.8 337.33 302.84 500 460.95 337.33 386.23 174.67 394.26 12 466.19z" />
     </svg>
+  )
+}
+
+/** A quiet (i): details on hover or focus. Fixed, so cards and scroll areas never clip it. */
+export function Info(props: { children: ComponentChildren }) {
+  const [at, setAt] = useState<{ left: number; top: number; transform: string }>()
+  const show = (e: Event) => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    const left = Math.max(146, Math.min(innerWidth - 146, r.left + r.width / 2))
+    const below = r.top < 140
+    setAt({ left, top: below ? r.bottom + 8 : r.top - 8, transform: `translate(-50%, ${below ? 0 : '-100%'})` })
+  }
+  const hide = () => setAt(undefined)
+  return (
+    <span
+      class="info"
+      tabIndex={0}
+      aria-label="More information"
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
+      onClick={(e) => e.preventDefault()}
+    >
+      <Icon name="info" size={14} />
+      {at && (
+        <span class="tip" role="tooltip" style={at}>
+          {props.children}
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -196,7 +230,7 @@ export function Spinner() {
   return <span class="spinner" aria-label="loading" />
 }
 
-export function Modal(props: { title: string; onClose: () => void; children: ComponentChildren; wide?: boolean }) {
+export function Modal(props: { title: string; info?: ComponentChildren; onClose: () => void; children: ComponentChildren; wide?: boolean }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && props.onClose()
     window.addEventListener('keydown', onKey)
@@ -206,7 +240,9 @@ export function Modal(props: { title: string; onClose: () => void; children: Com
     <div class="overlay" onClick={(e) => e.target === e.currentTarget && props.onClose()}>
       <div class={`modal ${props.wide ? 'wide' : ''}`} role="dialog" aria-label={props.title}>
         <header>
-          <h3>{props.title}</h3>
+          <h3>
+            {props.title} {props.info && <Info>{props.info}</Info>}
+          </h3>
           <button class="icon-btn" onClick={props.onClose} aria-label="Close">
             <Icon name="x" />
           </button>
@@ -214,15 +250,5 @@ export function Modal(props: { title: string; onClose: () => void; children: Com
         {props.children}
       </div>
     </div>
-  )
-}
-
-/** A name with its identicon, as ENS shows names. */
-export function Name(props: { name: string; size?: number }) {
-  return (
-    <span class="name">
-      <Avatar seed={props.name} size={props.size} />
-      <span>{props.name}</span>
-    </span>
   )
 }

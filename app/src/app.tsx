@@ -1,5 +1,4 @@
 import * as navik from '@navik/sdk'
-import type { ComponentChildren } from 'preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { Address } from 'viem'
 
@@ -7,7 +6,7 @@ import { PrivacyDrawer, PrivacyPill } from './privacy.tsx'
 import { ProjectView } from './project.tsx'
 import { loggedWallet, useReads } from './reads.ts'
 import { store } from './store.ts'
-import { Addr, Avatar, Badge, CopyButton, Icon, Logo, Modal, Mono, primaryName, shortAddr, Spinner } from './ui.tsx'
+import { Addr, Avatar, Badge, CopyButton, Icon, Info, Logo, Modal, Mono, primaryName, shortAddr, Spinner } from './ui.tsx'
 import { Viewer } from './viewer.tsx'
 import {
   defaultChainId,
@@ -125,7 +124,7 @@ export function App() {
       <header class="nav">
         <div class="nav-inner">
           <a class="brand" href="#/">
-            <Logo /> navik
+            <Logo /> Navik
           </a>
           {route.page === 'project' && (
             <>
@@ -212,9 +211,9 @@ function AccountChip(props: { ctx?: navik.Ctx; account: Address }) {
 
 function WalletPicker(props: { wallets: WalletInfo[]; connect: (w: WalletInfo) => void; onClose: () => void }) {
   return (
-    <Modal title="Connect a wallet" onClose={props.onClose}>
+    <Modal title="Connect a wallet" info="Your wallet only signs. Reads go through an anonymizing network." onClose={props.onClose}>
       {props.wallets.length === 0 ? (
-        <p class="muted">No browser wallet found. Install one to deploy; opening sites needs no wallet.</p>
+        <p class="muted">No browser wallet found.</p>
       ) : (
         <div class="wallet-list">
           {props.wallets.map((w) => (
@@ -226,96 +225,117 @@ function WalletPicker(props: { wallets: WalletInfo[]; connect: (w: WalletInfo) =
           ))}
         </div>
       )}
-      <p class="small muted">
-        Your wallet only signs. Every read goes through an anonymizing network, so neither the wallet's RPC nor ours sees
-        what you browse.
-      </p>
     </Modal>
   )
 }
 
 function Landing(props: { onConnect: () => void; root: string }) {
   const [name, setName] = useState('')
+  const site = `portfolio.${props.root}`
   return (
     <div class="landing">
       <section class="hero">
-        <span class="eyebrow">
-          <Icon name="shield" size={14} /> ENSv2 · ERC-8244 · private reads via anon-rpc
-        </span>
-        <h1>
-          Ship websites to Ethereum.
-          <br />
-          <span class="accent-text">Name every release with ENS.</span>
-        </h1>
-        <p class="lead">
-          Deploy a single-file site as an immutable contract. Every release gets a permanent name, production is one ENS
-          record, and no server sits in between.
-        </p>
-        <form
-          class="search"
-          onSubmit={(e) => {
-            e.preventDefault()
-            if (name) location.hash = `#/open/${name}`
-          }}
-        >
-          <Icon name="search" size={18} />
-          <input
-            placeholder={`Open a site, e.g. portfolio.${props.root}`}
-            value={name}
-            aria-label="Name to open"
-            onInput={(e) => setName((e.currentTarget as HTMLInputElement).value.trim().toLowerCase())}
-          />
-          <button class="btn primary" disabled={!name}>
-            Open
-          </button>
-        </form>
-        <div class="hero-actions">
-          <button class="btn dark lg" onClick={props.onConnect}>
-            Connect wallet to deploy
-          </button>
+        <div>
+          <h1>Onchain publishing, independently served.</h1>
+          <p class="lead">Immutable websites on Ethereum, named with ENS.</p>
+          <form
+            class="search"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (name) location.hash = `#/open/${name}`
+            }}
+          >
+            <Icon name="search" size={18} />
+            <input
+              placeholder={`Open ${site}`}
+              value={name}
+              aria-label="Name to open"
+              onInput={(e) => setName((e.currentTarget as HTMLInputElement).value.trim().toLowerCase())}
+            />
+            <button class="btn primary" disabled={!name}>
+              Open
+            </button>
+          </form>
+          <div class="hero-actions">
+            <button class="btn lg" onClick={props.onConnect}>
+              Deploy a site
+            </button>
+          </div>
+        </div>
+
+        <div class="hero-side">
+          <div class="card deploy-card" aria-hidden="true">
+            <div class="dc-head">
+              <Logo size={36} />
+              <div>
+                <strong>{site}</strong>
+                <span class="mono muted small">3.{site}</span>
+              </div>
+              <Badge tone="ok">
+                <Icon name="check" size={12} /> Published
+              </Badge>
+            </div>
+            <ol class="waypoints">
+              <li>
+                <i />v1
+              </li>
+              <li>
+                <i />v2
+              </li>
+              <li class="now">
+                <i />v3
+              </li>
+            </ol>
+            <div class="dc-foot">
+              <span>
+                <Icon name="eth" size={15} /> Ethereum
+              </span>
+              <span>
+                <Icon name="lock" size={15} /> Immutable
+              </span>
+              <span>
+                <Icon name="globe" size={15} /> ENS
+              </span>
+            </div>
+          </div>
+          <code class="cli">
+            <i>$</i> navik deploy portfolio ./index.html --promote
+          </code>
         </div>
       </section>
 
-      <section class="terminal" aria-label="CLI example">
-        <div class="terminal-bar">
-          <i />
-          <i />
-          <i />
-        </div>
-        <pre>
-          <span class="muted">$</span> navik deploy portfolio ./index.html --promote{'\n\n'}
-          <span class="muted">release </span> 3.portfolio.{props.root}
-          {'\n'}
-          <span class="muted">size    </span> 21,402 bytes · 1 chunk{'\n'}
-          <span class="muted">promoted</span> portfolio.{props.root} <span class="accent-text">→</span> 3.portfolio.
-          {props.root}
-        </pre>
-      </section>
-
+      <svg class="horizon" viewBox="0 0 1000 36" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M0 35C300-11 700-11 1000 35" />
+      </svg>
       <section class="features">
-        <Feature icon="layers" title="Immutable releases">
-          Each deploy is a contract that returns your HTML. Nobody can alter it, including us.
-        </Feature>
-        <Feature icon="globe" title="Named by ENS">
-          <Mono>3.site.{props.root}</Mono> forever, <Mono>preview.</Mono> follows the newest, and production is one
-          record. Roll back in one click.
-        </Feature>
-        <Feature icon="shield" title="Private by default">
-          Reads go through a mixnet: your RPC provider never learns who looks at which site.
-        </Feature>
+        <div class="feature">
+          <span class="feature-icon">
+            <Icon name="layers" size={18} />
+          </span>
+          <div>
+            <h3>Immutable</h3>
+            <p>Every release is a contract.</p>
+          </div>
+        </div>
+        <div class="feature">
+          <span class="feature-icon">
+            <Icon name="globe" size={18} />
+          </span>
+          <div>
+            <h3>Versioned</h3>
+            <p>Permanent names, instant rollback.</p>
+          </div>
+        </div>
+        <div class="feature">
+          <span class="feature-icon">
+            <Icon name="shield" size={18} />
+          </span>
+          <div>
+            <h3>Private</h3>
+            <p>Reads go through a mixnet.</p>
+          </div>
+        </div>
       </section>
-    </div>
-  )
-}
-
-function Feature(props: { icon: 'layers' | 'globe' | 'shield'; title: string; children: ComponentChildren }) {
-  return (
-    <div class="feature">
-      <span class="feature-icon">
-        <Icon name={props.icon} size={18} />
-      </span>
-      <h3>{props.title}</h3>
-      <p>{props.children}</p>
     </div>
   )
 }
@@ -404,7 +424,6 @@ function Projects(props: { ctx: navik.Ctx; account: Address }) {
             <Icon name="layers" size={20} />
           </span>
           <h2>{filter ? 'No matching projects' : 'No projects yet'}</h2>
-          <p class="muted">Claim a name under {ctx.deployment.root}, then drop in an HTML build.</p>
           <a class="btn primary" href="#/new">
             <Icon name="plus" /> New project
           </a>
@@ -482,11 +501,9 @@ function NewProject(props: { ctx: navik.Ctx; account: Address; run: Run; busy: b
   const available = valid && owner === null
   return (
     <div class="page narrow">
-      <h1>Claim a project name</h1>
-      <p class="muted">
-        Your project gets a permanent ENS name that nobody, including Navik, can take back. Every release gets its own
-        subname.
-      </p>
+      <h1>
+        Claim a name <Info>A permanent ENS name nobody can take back, including Navik. Every release gets a subname.</Info>
+      </h1>
       <form
         class="card claim"
         onSubmit={async (e) => {
@@ -511,9 +528,7 @@ function NewProject(props: { ctx: navik.Ctx; account: Address; run: Run; busy: b
           <span class="suffix">.{root}</span>
         </div>
         <p class="small name-status">
-          {!label ? (
-            <span class="muted">3–63 characters: a–z, 0–9 and hyphens.</span>
-          ) : !valid ? (
+          {!label ? null : !valid ? (
             <span class="error">3–63 of a–z, 0–9 and -, not starting or ending with -</span>
           ) : owner === undefined ? (
             <span class="muted">
@@ -551,7 +566,7 @@ function NewProject(props: { ctx: navik.Ctx; account: Address; run: Run; busy: b
         }}
       >
         <label class="small muted" for="existing">
-          Have a deploy key for someone else's project? Add it to your list.
+          Add a project you hold a key for
         </label>
         <div class="row">
           <input id="existing" placeholder="project name" value={existing} onInput={(e) => setExisting((e.currentTarget as HTMLInputElement).value.trim())} />

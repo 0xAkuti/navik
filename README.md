@@ -56,7 +56,7 @@ That makes three transactions (registries have no multicall), all from one walle
 
 ## Dashboard
 
-`app/` is a dashboard in ENS colours. Opening a site needs no wallet; connect one to manage projects:
+`app/` is the dashboard. Opening a site needs no wallet; connect one to manage projects:
 - **Projects:** each card shows what production serves and how many releases the project has.
 - **New project:** type a name, see whether it's available live (as in the ENS app), and claim it.
 - **Project page:** a live, hash-checked thumbnail of production, the release list (production and preview tagged; promote or roll back in one click), a Domains tab to link names you own ([custom domains](#how-it-works)), and an Access tab for deploy keys.

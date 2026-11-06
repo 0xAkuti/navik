@@ -14,7 +14,7 @@ import {
   UNSUPPORTED,
   useReads,
 } from './reads.ts'
-import { Badge, kb } from './ui.tsx'
+import { Badge, Info, kb } from './ui.tsx'
 
 /** Header pill: where reads go right now, and how many reads went through anon-rpc. */
 export function PrivacyPill(props: { open: boolean; onToggle: () => void }) {
@@ -25,21 +25,21 @@ export function PrivacyPill(props: { open: boolean; onToggle: () => void }) {
   const reads = r.calls.anon + r.calls.direct
   const tone = !n || !n.anonymous ? 'warn' : r.phase === 'failed' ? 'error' : r.phase === 'ready' ? 'ok' : 'muted'
   const label = !n
-    ? 'Direct reads: the RPC sees your IP'
+    ? 'Direct reads'
     : !n.anonymous
       ? `${n.name}: not anonymous`
       : r.phase === 'failed'
-        ? `${n.name} unreachable: reads paused`
+        ? `${n.name} unreachable`
         : r.phase === 'ready'
-          ? `Private reads via ${n.name}`
+          ? `Private via ${n.name}`
           : `Connecting to ${n.name}…`
   return (
-    <button class={`pill ${tone}`} onClick={props.onToggle} aria-expanded={props.open} title="How this app reads Ethereum">
+    <button class={`pill ${tone}`} onClick={props.onToggle} aria-expanded={props.open} title="Reads and privacy">
       <i class={`dot ${tone}`} />
       <span class="pill-label">{label}</span>
       {reads > 0 && (
-        <span class="pill-count">
-          {r.calls.anon}/{reads} reads via anon-rpc
+        <span class="pill-count" title={`${r.calls.anon} of ${reads} reads via anon-rpc`}>
+          {r.calls.anon}/{reads}
         </span>
       )}
     </button>
@@ -53,14 +53,19 @@ export function PrivacyDrawer(props: { onClose: () => void }) {
   const [showLog, setShowLog] = useState(false)
   if (chainId === undefined || !r.settings) return null
 
-  const n = networkById(r.settings.network)
   const reads = r.calls.anon + r.calls.direct
   const pct = reads ? Math.round((100 * r.calls.anon) / reads) : 100
 
   return (
     <section class="drawer" aria-label="Network privacy">
       <header>
-        <h2>How this app reads Ethereum</h2>
+        <h2>
+          Reads{' '}
+          <Info>
+            Reads go through anon-rpc: the RPC sees a mixnet exit, not your IP. Your wallet only signs. If the network is down, reads stop;
+            nothing falls back to a direct connection.
+          </Info>
+        </h2>
         <button class="btn ghost sm" onClick={props.onClose}>
           Close
         </button>
@@ -69,26 +74,18 @@ export function PrivacyDrawer(props: { onClose: () => void }) {
         <div class="drawer-settings">
           <div class="meter">
             <strong>{pct}%</strong> of {reads} reads through anon-rpc
-            {n && !n.anonymous && <Badge tone="warn">{n.name} does not anonymize</Badge>}
             <div class="meter-bar">
               <span style={{ width: `${pct}%` }} />
             </div>
-            <p class="small muted">
-              {r.calls.anon} via anon-rpc ({kb(r.bytes.anon)}) · {r.calls.direct} direct ({kb(r.bytes.direct)}). Plus{' '}
-              {r.calls.wallet} wallet request{r.calls.wallet === 1 ? '' : 's'} (account, chain, signing), which are not reads
-            </p>
-            <p class="small muted">
-              Names, projects, releases and site bytes are read through the anon-rpc network: the RPC provider sees a
-              mixnet exit, not your IP. So are release provenance and attestations on Arkiv, over a route of their own.
-              Only signing and broadcasting go to your wallet, and a broadcast transaction is public anyway. If the
-              network is unreachable, reads stop; nothing falls back to a direct connection.
+            <p class="small muted" title={`${kb(r.bytes.anon)} via anon-rpc, ${kb(r.bytes.direct)} direct`}>
+              {r.calls.anon} via anon-rpc · {r.calls.direct} direct · {r.calls.wallet} wallet
             </p>
           </div>
 
           <RouteSettings chainId={chainId} title="Ethereum reads" settings={r.settings} />
           <RouteSettings
             chainId={ARKIV_CHAIN_ID}
-            title="Arkiv reads (release provenance)"
+            title="Arkiv reads"
             settings={r.routes[ARKIV_CHAIN_ID] ?? settingsFor(ARKIV_CHAIN_ID)}
           />
         </div>
@@ -142,7 +139,7 @@ function RouteSettings(props: { chainId: number; title: string; settings: ReadSe
       }}
     >
       <fieldset>
-        <legend class="small muted">{props.title}: route through</legend>
+        <legend>{props.title}</legend>
         {NETWORKS.map((net) => {
           const unsupported = UNSUPPORTED[props.chainId]?.[net.id]
           return (
@@ -154,26 +151,18 @@ function RouteSettings(props: { chainId: number; title: string; settings: ReadSe
                 disabled={!!unsupported}
                 onChange={() => setNetwork(net.id)}
               />
-              <span>
-                <strong>{net.name}</strong> {!net.anonymous && <Badge tone="warn">not anonymous</Badge>}
-                {unsupported && <Badge>unavailable</Badge>}
-                <span class="small muted"> {unsupported ?? net.tagline}</span>
-              </span>
+              <span>{net.name}</span>
+              <Info>{unsupported ?? net.tagline}</Info>
             </label>
           )
         })}
         <label class="radio">
           <input type="radio" name={`network-${props.chainId}`} checked={network === 'direct'} onChange={() => setNetwork('direct')} />
-          <span>
-            <strong>Direct</strong> <Badge tone="warn">not anonymous</Badge>
-            <span class="small muted"> straight to the RPC, which sees your IP with every read</span>
-          </span>
+          <span>Direct</span>
+          <Info>Straight to the RPC, which sees your IP with every read.</Info>
         </label>
       </fieldset>
-      <label class="small muted" for={`read-rpc-${props.chainId}`}>
-        RPC endpoint (reached through the network above)
-      </label>
-      <input id={`read-rpc-${props.chainId}`} list={`read-rpcs-${props.chainId}`} value={rpc} onInput={(e) => setRpc((e.currentTarget as HTMLInputElement).value.trim())} />
+      <input id={`read-rpc-${props.chainId}`} aria-label="RPC endpoint" list={`read-rpcs-${props.chainId}`} value={rpc} onInput={(e) => setRpc((e.currentTarget as HTMLInputElement).value.trim())} />
       <datalist id={`read-rpcs-${props.chainId}`}>
         {(PUBLIC_RPCS[props.chainId] ?? []).map((u) => (
           <option key={u} value={u} />

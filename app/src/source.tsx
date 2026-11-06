@@ -5,7 +5,7 @@ import type { Address, EIP1193Provider } from 'viem'
 
 import { arkivRead, entityUrl, onArkiv, sendArkiv } from './arkiv.ts'
 import { ARKIV_CHAIN_ID, networkById, reconnect, useReads } from './reads.ts'
-import { Badge, Hash, Icon, Mono, Spinner, Who } from './ui.tsx'
+import { Badge, Hash, Icon, Info, Mono, Spinner, Who } from './ui.tsx'
 
 export type Wallet = { provider: EIP1193Provider; account: Address }
 export type Compared = { file: string; cmp: navik.BuildComparison }
@@ -89,7 +89,13 @@ export function SourcePanel(props: { ctx: navik.Ctx; v: navik.Verification; isol
     <section class="card verify source" aria-label="Source and reproductions">
       <div class="row">
         <h3>Source</h3>
+        {p && (
+          <Info>
+            Rebuild it: <Mono>navik reproduce {v.name} --yes</Mono>
+          </Info>
+        )}
         <span class="spacer" />
+        {error && <Badge>unavailable</Badge>}
         {records && !error && (
           <Badge tone={matches.length && !mismatches.length ? 'ok' : mismatches.length ? 'warn' : 'muted'}>
             {matches.length ? `reproduced ×${matches.length}` : p ? 'not reproduced yet' : 'no provenance'}
@@ -99,35 +105,31 @@ export function SourcePanel(props: { ctx: navik.Ctx; v: navik.Verification; isol
 
       {!records && !error && (
         <p class="muted small row">
-          <Spinner /> Reading provenance from Arkiv{arkivNet ? ` via ${arkivNet.name}` : ''}…
+          <Spinner /> Reading Arkiv{arkivNet ? ` via ${arkivNet.name}` : ''}…
         </p>
       )}
       {error && (
-        <p class="muted small">
-          Provenance is unavailable; the site itself is verified on Ethereum above. <span class="error">{error}</span>{' '}
+        <div class="row small muted">
+          Provenance unavailable <Info>{error}. The site is still verified on Ethereum.</Info>
+          <span class="spacer" />
           <button class="btn sm" onClick={retry}>
             Retry
           </button>
-        </p>
+        </div>
       )}
 
       {records && !error && (
         <>
           <ul class="checks">
-            {p ? (
+            {p && (
               <Check ok>
-                Provenance recorded on Arkiv by the publisher <Who ctx={ctx} address={p.creator} chainId={chainId} />
-              </Check>
-            ) : (
-              <Check>
-                No provenance from {records.publisher ? <>the publisher <Who ctx={ctx} address={records.publisher} chainId={chainId} /></> : 'a known publisher'}
-                {ignored > 0 && `; ${ignored} record${ignored === 1 ? '' : 's'} by other accounts ignored`}
+                Published by <Who ctx={ctx} address={p.creator} chainId={chainId} />
               </Check>
             )}
-            {p?.sourceSwarm && <Check ok>Source archived on Swarm, pinned by its keccak256</Check>}
+            {p?.sourceSwarm && <Check ok>Source on Swarm</Check>}
             {matches.length > 0 && (
               <Check ok>
-                Rebuilt byte for byte by {matches.length} builder{matches.length === 1 ? '' : 's'}
+                Rebuilt by {matches.length} builder{matches.length === 1 ? '' : 's'}
               </Check>
             )}
             {mismatches.length > 0 && (
@@ -136,6 +138,16 @@ export function SourcePanel(props: { ctx: navik.Ctx; v: navik.Verification; isol
               </Check>
             )}
           </ul>
+
+          {!p && records.publisher && (
+            <dl class="facts">
+              <dt>Publisher</dt>
+              <dd>
+                <Who ctx={ctx} address={records.publisher} chainId={chainId} />{' '}
+                {ignored > 0 && <Info>{ignored} record{ignored === 1 ? '' : 's'} by other accounts ignored</Info>}
+              </dd>
+            </dl>
+          )}
 
           {p && (
             <dl class="facts">
@@ -205,12 +217,6 @@ export function SourcePanel(props: { ctx: navik.Ctx; v: navik.Verification; isol
             </ul>
           )}
 
-          {p && (
-            <p class="small muted">
-              Rebuild it yourself: <Mono>navik reproduce {v.name} --yes</Mono>, or build it and drop the file below.
-            </p>
-          )}
-
           <div class="row">
             {compared && (
               <button
@@ -252,7 +258,11 @@ export function SourcePanel(props: { ctx: navik.Ctx; v: navik.Verification; isol
               </button>
             )}
           </div>
-          {compared && !wallet && <p class="small muted">Connect a wallet (with tGLM on Arkiv) to publish your result.</p>}
+          {compared && !wallet && (
+            <p class="small muted">
+              Connect a wallet to attest <Info>Signing on Arkiv needs tGLM.</Info>
+            </p>
+          )}
           {notice && <p class={`small ${notice.ok ? 'ok-text' : 'error'}`}>{notice.text}</p>}
         </>
       )}

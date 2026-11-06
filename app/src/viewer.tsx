@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 
 import { networkById, useReads } from './reads.ts'
 import { type Compared, SourcePanel, type Wallet } from './source.tsx'
-import { Addr, Badge, Hash, Icon, kb, Mono, Spinner } from './ui.tsx'
+import { Addr, Badge, Hash, Icon, Info, kb, Mono, Spinner } from './ui.tsx'
 
 type Loaded = { v: navik.Verification; ms: number; calls: number; bytes: number }
 
@@ -70,7 +70,7 @@ export function Viewer(props: { ctx: navik.Ctx; name: string; wallet?: Wallet })
           {progress ? <Spinner /> : <Icon name={ok ? 'shield' : 'search'} />}
         </span>
         <input
-          placeholder={`portfolio.${ctx.deployment.root}, 3.portfolio, alice.eth`}
+          placeholder={`portfolio.${ctx.deployment.root}`}
           value={input}
           onInput={(e) => setInput((e.currentTarget as HTMLInputElement).value.trim().toLowerCase())}
           aria-label="Name to open"
@@ -86,11 +86,12 @@ export function Viewer(props: { ctx: navik.Ctx; name: string; wallet?: Wallet })
           <span class="feature-icon">
             <Icon name="globe" size={20} />
           </span>
-          <h2>Open any onchain site</h2>
-          <p class="muted">
-            Any ENS name with an ERC-8244 <Mono>contentcontract</Mono> record. Read from Ethereum through{' '}
-            {net?.anonymous ? net.name : 'your RPC'}, checked and rendered sandboxed, with no gateway.
-          </p>
+          <h2>
+            Open any onchain site{' '}
+            <Info>
+              Any ENS name with an ERC-8244 <Mono>contentcontract</Mono> record, read from Ethereum, checked and sandboxed.
+            </Info>
+          </h2>
           <a class="btn" href={`#/open/${ctx.deployment.root}`}>
             Try {ctx.deployment.root}
           </a>
@@ -122,26 +123,26 @@ export function Viewer(props: { ctx: navik.Ctx; name: string; wallet?: Wallet })
               </div>
               <ul class="checks">
                 <Check ok>
-                  <Mono>{loaded.v.name}</Mono> resolves to <Addr address={loaded.v.deployment} chainId={ctx.deployment.chainId} /> via ENS
+                  Resolves to <Addr address={loaded.v.deployment} chainId={ctx.deployment.chainId} />
                 </Check>
                 {loaded.v.isNavikDeployment ? (
                   <Check ok>
-                    A Navik release{loaded.v.releaseName && <>: <Mono>{loaded.v.releaseName}</Mono></>}
+                    Navik release{loaded.v.releaseName && <> <Mono>{loaded.v.releaseName}</Mono></>}
                   </Check>
                 ) : (
-                  <Check>Not a Navik release: any ERC-8244 contract, read as is</Check>
+                  <Check>Not a Navik release</Check>
                 )}
                 {loaded.v.belongsToProject !== undefined && (
                   <Check ok={loaded.v.belongsToProject}>
-                    {loaded.v.belongsToProject ? 'Belongs to the named project' : 'Does not belong to the named project'}
+                    {loaded.v.belongsToProject ? 'Belongs to the project' : 'Does not belong to the project'}
                   </Check>
                 )}
                 {loaded.v.isNavikDeployment && (
                   <Check ok={loaded.v.hashMatches}>
-                    {loaded.v.hashMatches ? 'Content hash matches the release manifest' : 'Content hash does NOT match the manifest'}
+                    {loaded.v.hashMatches ? 'Content hash matches' : 'Content hash does NOT match'}
                   </Check>
                 )}
-                {loaded.v.original && <Check ok>gzip-wrapped: decompressed to {kb(loaded.v.original.html.length)}</Check>}
+                {loaded.v.original && <Check ok>Gzipped, {kb(loaded.v.original.html.length)} unpacked</Check>}
               </ul>
               <dl class="facts">
                 <dt>Size</dt>
@@ -151,8 +152,8 @@ export function Viewer(props: { ctx: navik.Ctx; name: string; wallet?: Wallet })
                   <Hash value={loaded.v.computedHash} chars={14} />
                 </dd>
                 <dt>Read</dt>
-                <dd>
-                  {loaded.calls} calls, {kb(loaded.bytes)} in {(loaded.ms / 1000).toFixed(1)} s{net && <> via {net.name}</>}
+                <dd title={`${loaded.calls} calls, ${kb(loaded.bytes)}`}>
+                  {(loaded.ms / 1000).toFixed(1)} s{net && <> via {net.name}</>}
                 </dd>
               </dl>
               <CompareBuild v={loaded.v} result={compared} onResult={setCompared} />
@@ -214,12 +215,8 @@ function SiteFrame(props: { v: navik.Verification }) {
   return (
     <div class="site">
       <div class="site-bar">
-        <span class="lights">
-          <i />
-          <i />
-          <i />
-        </span>
-        <span class="muted small">Sandboxed: no access to this page or your wallet</span>
+        <span class="muted small">Sandboxed</span>
+        <Info>The site cannot reach this page or your wallet.</Info>
         <span class="spacer" />
         <button class="btn ghost sm" onClick={() => frame.current?.requestFullscreen?.()}>
           Full screen

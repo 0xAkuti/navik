@@ -3,16 +3,16 @@ import { useCallback, useEffect, useState } from 'preact/hooks'
 import { type Address, getAddress, zeroAddress } from 'viem'
 
 import type { Run } from './app.tsx'
-import { Addr, Avatar, Badge, Icon, Mono, Spinner, Who } from './ui.tsx'
+import { Avatar, Badge, Icon, Info, Mono, shortAddr, Spinner, Who } from './ui.tsx'
 
 const same = (a: Address, b: Address) => getAddress(a) === getAddress(b)
 
 /** Who has to sign each step, for the account looking at it. */
 function stepText(ctx: navik.Ctx, d: navik.Domain, step: navik.DomainStep, projectOwner: Address) {
   const who = (owner: Address) => (d.can[step] ? 'you' : <Who ctx={ctx} address={owner} chainId={ctx.deployment.chainId} />)
-  if (step === 'record') return <>Link the name to production on the project's resolver · {who(projectOwner)}</>
-  if (step === 'resolver') return <>Point the name at the project's resolver · {who(d.owner)}</>
-  return <>Share the project's release registry, for {'<N>'}.{d.name} · {who(d.owner)}</>
+  if (step === 'record') return <>Link production · {who(projectOwner)}</>
+  if (step === 'resolver') return <>Set resolver · {who(d.owner)}</>
+  return <>Share releases · {who(d.owner)}</>
 }
 
 function Steps(props: { ctx: navik.Ctx; domain: navik.Domain; projectOwner: Address }) {
@@ -97,17 +97,17 @@ export function DomainsCard(props: { ctx: navik.Ctx; project: string; projectOwn
 
   return (
     <section>
-      <h2 class="section-title">Domains</h2>
-      <p class="muted small">
-        Serve <Mono>{name}</Mono> from a name you own: <Mono>alice.eth</Mono> shows production and follows every promotion,{' '}
-        <Mono>3.alice.eth</Mono> any release, <Mono>preview.alice.eth</Mono> the newest. ENSv2 aliasing does it: the name shares the
-        project's release registry and its production record, with nothing copied.
-      </p>
+      <h2 class="section-title">
+        Domains{' '}
+        <Info>
+          Serve {name} from a name you own: <Mono>alice.eth</Mono> follows production, <Mono>3.alice.eth</Mono> a release.
+        </Info>
+      </h2>
 
       <div class="card list">
         {domains === undefined && !listError ? (
           <div class="empty-row muted">
-            <Spinner /> Reading linked names…
+            <Spinner /> Reading…
           </div>
         ) : listError ? (
           <div class="empty-row muted">Could not list domains from this RPC.</div>
@@ -120,7 +120,7 @@ export function DomainsCard(props: { ctx: navik.Ctx; project: string; projectOwn
               <a href={`#/open/${d.name}`}>
                 <Mono>{d.name}</Mono>
               </a>
-              {d.linked ? <Badge tone="ok">Linked</Badge> : <Badge tone="warn">Waiting for {pending(d).length} step{pending(d).length === 1 ? '' : 's'}</Badge>}
+              {d.linked ? <Badge tone="ok">Linked</Badge> : <Badge tone="warn">{pending(d).length} step{pending(d).length === 1 ? '' : 's'} left</Badge>}
               <span class="spacer" />
               {!d.linked && canFinish(d) && (
                 <button class="btn primary sm" disabled={busy} onClick={() => link(d.name)}>
@@ -140,7 +140,7 @@ export function DomainsCard(props: { ctx: navik.Ctx; project: string; projectOwn
         <form class="key-form" onSubmit={check}>
           <Icon name="globe" />
           <input
-            placeholder="alice.eth, or a subname you own"
+            placeholder="alice.eth"
             value={input}
             onInput={(e) => {
               setInput((e.currentTarget as HTMLInputElement).value)
@@ -170,15 +170,11 @@ export function DomainsCard(props: { ctx: navik.Ctx; project: string; projectOwn
               <Steps ctx={ctx} domain={checked} projectOwner={props.projectOwner} />
               {!checked.done.resolver && !same(checked.resolver, zeroAddress) && (
                 <p class="muted small">
-                  While linked, {checked.name} resolves from the project: its own records (address, avatar…) and existing subnames are
-                  hidden. Linking records what it points at now, and unlinking restores it: resolver{' '}
-                  <Addr address={checked.resolver} chainId={ctx.deployment.chainId} />
-                  {!same(checked.subregistry, zeroAddress) && (
-                    <>
-                      {' '}
-                      and subregistry <Addr address={checked.subregistry} chainId={ctx.deployment.chainId} />
-                    </>
-                  )}
+                  Hides its own records and subnames until unlinked.{' '}
+                  <Info>
+                    Unlinking restores resolver {shortAddr(checked.resolver)}
+                    {!same(checked.subregistry, zeroAddress) && ` and subregistry ${shortAddr(checked.subregistry)}`}.
+                  </Info>
                 </p>
               )}
               <div class="row">
@@ -187,10 +183,12 @@ export function DomainsCard(props: { ctx: navik.Ctx; project: string; projectOwn
                     Link {checked.name} ({txCount(checked)} transaction{txCount(checked) === 1 ? '' : 's'})
                   </button>
                 ) : (
-                  <span class="muted small">Your account cannot do any of the remaining steps.</span>
+                  <span class="muted small">Needs the other owner.</span>
                 )}
                 {txCount(checked) < pending(checked).length && canFinish(checked) && (
-                  <span class="muted small">The other owner finishes from this page or with `navik link`.</span>
+                  <Info>
+                    The other owner finishes here or with <Mono>navik link</Mono>.
+                  </Info>
                 )}
               </div>
             </>

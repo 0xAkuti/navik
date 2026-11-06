@@ -4,7 +4,7 @@ import { type Address, getAddress, isAddress } from 'viem'
 
 import type { Run } from './app.tsx'
 import { DomainsCard } from './domains.tsx'
-import { Addr, Avatar, Badge, Hash, Icon, kb, Modal, Mono, Spinner, Who } from './ui.tsx'
+import { Addr, Avatar, Badge, Hash, Icon, Info, kb, Modal, Mono, Spinner, Who } from './ui.tsx'
 
 type Data = {
   owner: Address
@@ -22,7 +22,7 @@ function LimoLink({ ctx, name }: { ctx: navik.Ctx; name: string }) {
   const url = navik.limoUrl(ctx, name)
   if (!url) return null
   return (
-    <a class="btn ghost sm" href={url} target="_blank" rel="noreferrer" title={`Public link, through the eth.limo gateway: ${url}`}>
+    <a class="btn ghost sm" href={url} target="_blank" rel="noreferrer" title={url}>
       eth.limo <Icon name="arrow" size={12} />
     </a>
   )
@@ -129,7 +129,7 @@ export function ProjectView(props: { ctx: navik.Ctx; project: string; tab?: stri
         <DomainsCard ctx={ctx} project={project} projectOwner={data.owner} busy={busy} act={act} />
       ) : (
         <>
-          <Production ctx={ctx} project={project} data={data} busy={busy} act={act} onDeploy={() => setDeploying(true)} />
+          <Production ctx={ctx} project={project} data={data} busy={busy} act={act} />
           <Releases ctx={ctx} project={project} data={data} busy={busy} act={act} />
         </>
       )}
@@ -141,7 +141,7 @@ export function ProjectView(props: { ctx: navik.Ctx; project: string; tab?: stri
   )
 }
 
-function Production(props: { ctx: navik.Ctx; project: string; data: Data; busy: boolean; act: Run; onDeploy: () => void }) {
+function Production(props: { ctx: navik.Ctx; project: string; data: Data; busy: boolean; act: Run }) {
   const { ctx, project, data, busy, act } = props
   const live = data.releases.find((r) => same(r.deployment, data.live))
   const preview = data.releases.find((r) => same(r.deployment, data.preview))
@@ -164,7 +164,7 @@ function Production(props: { ctx: navik.Ctx; project: string; data: Data; busy: 
               <span class="muted">→</span> <Mono>{live?.name ?? data.live}</Mono> <LimoLink ctx={ctx} name={name} />
             </>
           ) : (
-            <span class="muted">Nothing is live. Deploy a release and promote it.</span>
+            <span class="muted">Nothing is live.</span>
           )}
         </dd>
         {preview && (
@@ -174,7 +174,7 @@ function Production(props: { ctx: navik.Ctx; project: string; data: Data; busy: 
               <a href={`#/open/${navik.previewName(ctx, project)}`}>
                 <Mono>{navik.previewName(ctx, project)}</Mono>
               </a>{' '}
-              <span class="muted">→</span> <Mono>{preview.name}</Mono> <span class="muted small">(newest release)</span>
+              <span class="muted">→</span> <Mono>{preview.name}</Mono>
             </dd>
           </>
         )}
@@ -182,17 +182,11 @@ function Production(props: { ctx: navik.Ctx; project: string; data: Data; busy: 
           <>
             <dt>Content</dt>
             <dd class="muted">
-              {kb(live.size)} · {live.chunks} chunk{live.chunks === 1 ? '' : 's'} ·{' '}
-              <Hash value={live.contentHash} />
+              {kb(live.size)} · <Hash value={live.contentHash} />
             </dd>
           </>
         )}
         <dd class="prod-actions">
-          {!data.releases.length && data.perms.publish && (
-            <button class="btn primary sm" onClick={props.onDeploy}>
-              <Icon name="upload" size={14} /> Deploy your first release
-            </button>
-          )}
           {data.live && data.perms.promote && (
             <button class="btn sm" disabled={busy} onClick={() => act('Taking production offline', () => navik.demote(ctx, project))}>
               Take offline
@@ -237,7 +231,7 @@ function Releases(props: { ctx: navik.Ctx; project: string; data: Data; busy: bo
             const isPreview = same(r.deployment, data.preview)
             return (
               <div key={r.name} class={`release ${isLive ? 'is-live' : ''}`}>
-                <i class={`dot ${isLive ? 'ok' : ''}`} />
+                <i class={`dot ${isLive ? 'ok' : isPreview ? 'gold' : ''}`} />
                 <div class="release-main">
                   <div class="row">
                     <a href={`#/open/${r.name}`} class="release-name">
@@ -247,8 +241,7 @@ function Releases(props: { ctx: navik.Ctx; project: string; data: Data; busy: bo
                     {isPreview && <Badge tone="blue">Preview</Badge>}
                   </div>
                   <div class="muted small">
-                    <Addr address={r.deployment} chainId={ctx.deployment.chainId} /> · {kb(r.size)} · {r.chunks} chunk
-                    {r.chunks === 1 ? '' : 's'} · <Hash value={r.contentHash} chars={10} />
+                    <Addr address={r.deployment} chainId={ctx.deployment.chainId} /> · {kb(r.size)}
                   </div>
                 </div>
                 <div class="release-actions">
@@ -337,11 +330,11 @@ function DeployModal(props: { ctx: navik.Ctx; project: string; busy: boolean; ca
             </span>
             {file ? (
               <span>
-                <strong>{file.name}</strong> <span class="muted">· {kb(file.size)} · click to change</span>
+                <strong>{file.name}</strong> <span class="muted">· {kb(file.size)}</span>
               </span>
             ) : (
               <span>
-                <strong>Drop a single-file HTML build</strong> <span class="muted">or click to choose</span>
+                <strong>Drop an HTML file</strong> <span class="muted">or click to choose</span>
               </span>
             )}
           </label>
@@ -355,10 +348,8 @@ function DeployModal(props: { ctx: navik.Ctx; project: string; busy: boolean; ca
                 if (file) pick(file, on)
               }}
             />
-            <span>
-              <strong>Compress (gzip)</strong>
-              <span class="muted small"> fewer chunks and lower cost; the site then needs JavaScript to render</span>
-            </span>
+            <span>Compress (gzip)</span>
+            <Info>Fewer chunks and lower cost. The site then needs JavaScript to render.</Info>
           </label>
         </>
       )}
@@ -371,15 +362,9 @@ function DeployModal(props: { ctx: navik.Ctx; project: string; busy: boolean; ca
           </dd>
           <dt>Size</dt>
           <dd>
-            {kb(plan.size)} in {plan.chunks.length} chunk{plan.chunks.length === 1 ? '' : 's'}{' '}
-            <span class="muted">({reused} already onchain)</span>
-            {plan.compressed && (
-              <span class="muted">
-                {' '}
-                · compressed from {kb(plan.compressed.originalSize)}, {plan.compressed.originalChunks} chunk
-                {plan.compressed.originalChunks === 1 ? '' : 's'}
-              </span>
-            )}
+            {kb(plan.size)} · {plan.chunks.length} chunk{plan.chunks.length === 1 ? '' : 's'}
+            {plan.compressed && <span class="muted"> · compressed from {kb(plan.compressed.originalSize)}</span>}{' '}
+            {reused > 0 && <Info>{reused} already onchain</Info>}
           </dd>
           <dt>Transactions</dt>
           <dd>
@@ -388,7 +373,7 @@ function DeployModal(props: { ctx: navik.Ctx; project: string; busy: boolean; ca
           </dd>
           <dt>Address</dt>
           <dd>
-            <Addr address={plan.predicted} full link={false} /> <span class="muted small">known before upload</span>
+            <Addr address={plan.predicted} link={false} />
           </dd>
         </dl>
       )}
@@ -401,7 +386,7 @@ function DeployModal(props: { ctx: navik.Ctx; project: string; busy: boolean; ca
           ))}
           {working && (
             <li class="muted">
-              <Spinner /> Waiting for your wallet and the chain…
+              <Spinner /> Confirm in your wallet
             </li>
           )}
         </ol>
@@ -444,11 +429,9 @@ function AccessCard(props: { ctx: navik.Ctx; project: string; data: Data; busy: 
 
   return (
     <section>
-      <h2 class="section-title">Deploy keys</h2>
-      <p class="muted small">
-        Let a CI or teammate key ship releases (<em>deploy</em>) and optionally change production (<em>promote</em>) on
-        this project only. Enforced by ENSv2 permissions on the project's resolver; revoke any time.
-      </p>
+      <h2 class="section-title">
+        Deploy keys <Info>CI or teammate keys for this project only: deploy releases, optionally promote them. Revoke any time.</Info>
+      </h2>
       {!data.perms.owner ? (
         <div class="card empty-row muted">Only the project owner manages keys.</div>
       ) : (
