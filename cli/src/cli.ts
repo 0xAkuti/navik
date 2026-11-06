@@ -84,14 +84,15 @@ program
     const site = readSite(resolve(config.dir, config.output))
     if (site.pack) for (const line of describePack(site.pack)) console.log(line)
     const compress = await shouldCompress(site, config.compress)
-    const stored = compress ? await navik.wrapCompressed(site.bytes) : site.bytes
-    const chunks = Math.ceil(stored.length / CHUNK_SIZE)
-    console.log(`size         ${site.bytes.length} bytes${compress ? `, ${stored.length} compressed` : ''} → ${chunks} chunk(s)`)
+    const stored = await navik.storedLayout(site.bytes, { compress, assets: site.pack?.assets })
+    const chunks = stored.regions.reduce((n, length) => n + Math.ceil(length / CHUNK_SIZE), 0)
+    console.log(`size         ${site.bytes.length} bytes${compress ? `, ${stored.bytes.length} compressed` : ''} → ${chunks} chunk(s)`)
+    if (stored.segments) console.log(`segments     ${stored.segments} asset(s) in chunks of their own, reused while unchanged`)
     if (opts.out) {
       writeFileSync(opts.out, site.bytes)
       console.log(`wrote        ${opts.out}`)
     }
-    if (opts.smoke) await smokeOrFail(stored)
+    if (opts.smoke) await smokeOrFail(stored.bytes)
   })
 
 program
@@ -143,7 +144,7 @@ program
     const site = readSite(target)
     if (site.pack) for (const line of describePack(site.pack)) console.log(line)
     const compress = await shouldCompress(site, opts.compress ?? config?.compress)
-    const plan = await navik.planPublish(c, project, site.bytes, { compress })
+    const plan = await navik.planPublish(c, project, site.bytes, { compress, assets: site.pack?.assets })
     const latest = opts.force ? undefined : await navik.latestRelease(c, project)
     const unchanged = latest?.contentHash === plan.contentHash
     const reused = plan.chunks.filter((ch) => ch.stored).length
@@ -151,8 +152,9 @@ program
     if (unchanged) console.log(`release      ${latest.name} (unchanged: same bytes as the latest release, nothing to publish)`)
     else console.log(`release      ${plan.name}`)
     if (plan.compressed) {
-      const { originalSize, originalChunks } = plan.compressed
+      const { originalSize, originalChunks, segments } = plan.compressed
       console.log(`compressed   ${originalSize} → ${plan.size} bytes (${originalChunks} → ${plan.chunks.length} chunks)`)
+      if (segments) console.log(`segments     ${segments} asset(s) in chunks of their own, reused while unchanged`)
     }
     console.log(`size         ${plan.size} / ${plan.maxSize} bytes`)
     console.log(`chunks       ${plan.chunks.length} (${reused} already stored, ${plan.chunks.length - reused} new)`)
