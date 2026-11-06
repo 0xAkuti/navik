@@ -8,7 +8,7 @@ import * as navik from '@navik/sdk'
 import { type Address, concat as concatBytes, formatGwei, getAddress, type Hex, isAddress, parseGwei } from 'viem'
 import { getGasPrice } from 'viem/actions'
 
-import { type DeployResult, reportToGitHub } from './ci.ts'
+import { ciRunUrl, type DeployResult, reportReproductionToGitHub, reportToGitHub } from './ci.ts'
 import { type GlobalOptions, loadArkiv, loadArkivWriter, loadCtx, swarmApi, swarmBatch } from './config.ts'
 import { buildSite, describePack, findConfig, readSite, recordedBuild, shouldCompress } from './site.ts'
 import { describeSmoke, smoke } from './smoke.ts'
@@ -260,6 +260,7 @@ program
     console.log(`  reproduced by ${ok.length} builder(s)${ok.length < r.attestations.length ? `, ${r.attestations.length - ok.length} could not` : ''}`)
     for (const a of r.attestations) {
       console.log(`    ${a.result === 'match' ? '✓' : '✗'} ${a.creator}  ${a.commit ? `@ ${a.commit.slice(0, 12)} ` : ''}via ${a.tool}  · entity ${a.key}`)
+      if (a.log) console.log(`      log ${a.log}`)
     }
   })
 
@@ -270,7 +271,9 @@ program
   .option('--git', 'fetch the source from its git repo even if it is on Swarm')
   .option('--attest', 'publish the result (match or mismatch) as an attestation on Arkiv')
   .option('--yes', "run the recorded build command (it is the publisher's code: read it first, or use a sandbox)")
-  .action(async (name: string, opts: { git?: boolean; attest?: boolean; yes?: boolean }) => {
+  .option('--tool <name>', 'with --attest: what made the attestation (default navik-ci in GitHub Actions, else navik-cli)')
+  .option('--log <url>', 'with --attest: public https log of this rebuild (default: the GitHub Actions run)')
+  .action(async (name: string, opts: { git?: boolean; attest?: boolean; yes?: boolean; tool?: string; log?: string }) => {
     const c = await ctx()
     const v = await navik.verify(c, name)
     if (!v.hashMatches) throw new Error(`${v.name} failed verification; run \`navik verify\``)
@@ -304,6 +307,7 @@ program
       const cmp = navik.compareBuild(v, built)
       console.log(cmp.matches ? `✓ byte-identical to ${v.name}` : `✗ the rebuild (keccak256 ${cmp.hash}) differs from ${v.name}`)
       if (!cmp.matches) process.exitCode = 1
+      let attestation: string | undefined
       if (opts.attest) {
         const { entityKey, txHash } = await navik.attest(loadArkivWriter(), {
           chainId: c.publicClient.chain.id,
@@ -316,10 +320,13 @@ program
           repo: trusted.repo,
           commit: trusted.commit,
           build: trusted.build,
-          tool: 'navik-cli',
+          tool: opts.tool ?? (ciRunUrl() ? 'navik-ci' : 'navik-cli'),
+          log: opts.log ?? ciRunUrl(),
         })
+        attestation = entityKey
         console.log(`attested on Arkiv: entity ${entityKey} (tx ${txHash})`)
       }
+      reportReproductionToGitHub({ name: v.name, commit: trusted.commit, reproduced: cmp.matches, builtHash: cmp.hash, attestation })
     } finally {
       rmSync(work, { recursive: true, force: true })
     }
