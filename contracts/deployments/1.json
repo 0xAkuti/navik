@@ -1,0 +1,14 @@
+{
+  "chainId": 1,
+  "deployBlock": 26357471,
+  "ethRegistry": "0xf60aba43E1f7F3DAB1186Ff03B561401C9Df85E2",
+  "factory": "0xED3d1111288c5Fd9fEf64d93D30e280C406AE9b3",
+  "pages": "0x65bec6934b24390F9195C5bCF8A59fa008964722",
+  "registrar": "0x3410e3dBef8bc2e5eB7a8e983926B971831177f7",
+  "registry": "0xbE560fA77bF87557526a106c6D773e0F067e7462",
+  "resolver": "0x5220d049f9Ed013d7756DF2e2dF50fe517944948",
+  "root": "navik.eth",
+  "rootNode": "0x99229b2b2ce5bbc43fccf13a7fbeae548fa4cd48523a8b35d464ff4e9d574c9a",
+  "rootProject": "app",
+  "universalResolver": "0x06Fdd07F007ADaC667177b46aB2EB9A75132Cfd5"
+}
