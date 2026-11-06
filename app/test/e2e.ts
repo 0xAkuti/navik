@@ -61,6 +61,12 @@ async function step(name: string, fn: () => Promise<void>) {
 const WALLET_METHODS = new Set(['eth_requestAccounts', 'eth_accounts', 'eth_chainId', 'eth_sendTransaction', 'wallet_switchEthereumChain'])
 // the passthrough anon-rpc worker's code, keccak-pinned in the app
 const WORKER_BUNDLE = 'https://raw.githubusercontent.com/privacy-ethereum/anon-rpc/'
+// Arkiv (release provenance): read through the passthrough worker too, so the test needs no mixnet
+const ARKIV_RPC = 'https://rpc.rabdi.db-chain.testnet.arkiv.network'
+function arkivPassthrough(rpc: string) {
+  // init scripts also run in the sandboxed frames, which have no storage
+  if (window.top === window) localStorage.setItem('navik:reads:7794095', JSON.stringify({ network: 'passthrough', rpc }))
+}
 const siteFrame = (page: Page) => page.frameLocator('iframe.site-frame')
 
 const production = (page: Page) => page.locator('.prod-live')
@@ -91,11 +97,12 @@ const page = await browser.newPage()
 const external: string[] = []
 page.on('request', (r) => {
   const url = r.url()
-  if (!/^(file:|data:|blob:|about:)/.test(url) && !url.startsWith(RPC) && !url.startsWith(WORKER_BUNDLE)) external.push(url)
+  if (!/^(file:|data:|blob:|about:)/.test(url) && ![RPC, WORKER_BUNDLE, ARKIV_RPC].some((u) => url.startsWith(u))) external.push(url)
 })
 page.on('pageerror', (e) => console.error('page error:', e.message))
 await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
 await page.addInitScript(injectWallet, { rpc: RPC, account: ALICE })
+await page.addInitScript(arkivPassthrough, ARKIV_RPC)
 
 try {
   await step('load the single-file app and connect the wallet', async () => {
@@ -218,13 +225,18 @@ try {
 
   await step('open a site with no wallet, and compare it with a local build', async () => {
     const viewer = await browser.newPage()
+    await viewer.addInitScript(arkivPassthrough, ARKIV_RPC)
     await viewer.goto(`${APP}#/open/1.${project}.navik.eth`)
     await siteFrame(viewer).getByText('hello from v1').waitFor()
+    // provenance comes from Arkiv; this release has none, and its publisher is named
+    await viewer.locator('.source').getByText('No provenance from the publisher').waitFor()
     await shot(viewer, { path: `${SHOTS}-6-viewer-no-wallet.png` })
     await viewer.locator('.compare input[type=file]').setInputFiles({ name: 'index.html', mimeType: 'text/html', buffer: site(1) })
     await viewer.getByText('index.html is byte-identical to the release').waitFor()
     await viewer.locator('.compare input[type=file]').setInputFiles({ name: 'other.html', mimeType: 'text/html', buffer: site(9) })
     await viewer.getByText('other.html differs').waitFor()
+    // with no wallet, the result can be shown but not attested
+    await viewer.getByText('Connect a wallet (with tGLM on Arkiv) to publish your result.').waitFor()
     // an unknown name fails cleanly
     await viewer.getByLabel('Name to open').fill(`9.${project}.navik.eth`)
     await viewer.getByRole('button', { name: 'Open', exact: true }).click()
@@ -234,8 +246,9 @@ try {
 
   await step('switch reads to Direct: the panel shows them as direct', async () => {
     await page.locator('button.pill').click()
-    await page.getByLabel(/^Direct/).check()
-    await page.getByRole('button', { name: 'Apply' }).click()
+    const ethereum = page.locator('.drawer form').first()
+    await ethereum.getByLabel(/^Direct/).check()
+    await ethereum.getByRole('button', { name: 'Apply' }).click()
     await page.locator('button.pill', { hasText: 'Direct reads' }).waitFor()
     await page.goto(`${APP}#/open/1.${project}.navik.eth`)
     await siteFrame(page).getByText('hello from v1').waitFor()

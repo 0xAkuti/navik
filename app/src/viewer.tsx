@@ -3,6 +3,7 @@ import type { ComponentChildren } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 
 import { networkById, useReads } from './reads.ts'
+import { type Compared, SourcePanel, type Wallet } from './source.tsx'
 import { Addr, Badge, Hash, Icon, kb, Mono, Spinner } from './ui.tsx'
 
 type Loaded = { v: navik.Verification; ms: number; calls: number; bytes: number }
@@ -12,13 +13,14 @@ type Loaded = { v: navik.Verification; ms: number; calls: number; bytes: number 
  * UniversalResolver, reads the bytes from Ethereum (through the anon-rpc network), checks them,
  * and renders the site in a sandboxed frame. No gateway, no server, no wallet needed.
  */
-export function Viewer(props: { ctx: navik.Ctx; name: string }) {
-  const { ctx, name } = props
+export function Viewer(props: { ctx: navik.Ctx; name: string; wallet?: Wallet }) {
+  const { ctx, name, wallet } = props
   const reads = useReads()
   const [input, setInput] = useState(name)
   const [progress, setProgress] = useState<{ step: string; done?: number; total?: number }>()
   const [loaded, setLoaded] = useState<Loaded>()
   const [error, setError] = useState<string>()
+  const [compared, setCompared] = useState<Compared>()
   const counters = useRef(reads)
   counters.current = reads
 
@@ -26,6 +28,7 @@ export function Viewer(props: { ctx: navik.Ctx; name: string }) {
     setInput(name)
     setLoaded(undefined)
     setError(undefined)
+    setCompared(undefined)
     if (!name) return
     let cancelled = false
     const before = counters.current
@@ -110,49 +113,52 @@ export function Viewer(props: { ctx: navik.Ctx; name: string }) {
       {loaded && (
         <div class="viewer-grid">
           {ok ? <SiteFrame v={loaded.v} /> : <div class="card error-card">This site failed verification and is not rendered.</div>}
-          <aside class="card verify">
-            <div class="row">
-              <h3>Verification</h3>
-              <span class="spacer" />
-              <Badge tone={ok ? 'ok' : 'warn'}>{ok ? 'verified' : 'check failed'}</Badge>
-            </div>
-            <ul class="checks">
-              <Check ok>
-                <Mono>{loaded.v.name}</Mono> resolves to <Addr address={loaded.v.deployment} chainId={ctx.deployment.chainId} /> via ENS
-              </Check>
-              {loaded.v.isNavikDeployment ? (
+          <div class="side">
+            <aside class="card verify">
+              <div class="row">
+                <h3>Verification</h3>
+                <span class="spacer" />
+                <Badge tone={ok ? 'ok' : 'warn'}>{ok ? 'verified' : 'check failed'}</Badge>
+              </div>
+              <ul class="checks">
                 <Check ok>
-                  A Navik release{loaded.v.releaseName && <>: <Mono>{loaded.v.releaseName}</Mono></>}
+                  <Mono>{loaded.v.name}</Mono> resolves to <Addr address={loaded.v.deployment} chainId={ctx.deployment.chainId} /> via ENS
                 </Check>
-              ) : (
-                <Check>Not a Navik release: any ERC-8244 contract, read as is</Check>
-              )}
-              {loaded.v.belongsToProject !== undefined && (
-                <Check ok={loaded.v.belongsToProject}>
-                  {loaded.v.belongsToProject ? 'Belongs to the named project' : 'Does not belong to the named project'}
-                </Check>
-              )}
-              {loaded.v.isNavikDeployment && (
-                <Check ok={loaded.v.hashMatches}>
-                  {loaded.v.hashMatches ? 'Content hash matches the release manifest' : 'Content hash does NOT match the manifest'}
-                </Check>
-              )}
-              {loaded.v.original && <Check ok>gzip-wrapped: decompressed to {kb(loaded.v.original.html.length)}</Check>}
-            </ul>
-            <dl class="facts">
-              <dt>Size</dt>
-              <dd>{kb(loaded.v.html.length)}</dd>
-              <dt>keccak256</dt>
-              <dd>
-                <Hash value={loaded.v.computedHash} chars={14} />
-              </dd>
-              <dt>Read</dt>
-              <dd>
-                {loaded.calls} calls, {kb(loaded.bytes)} in {(loaded.ms / 1000).toFixed(1)} s{net && <> via {net.name}</>}
-              </dd>
-            </dl>
-            <CompareBuild v={loaded.v} />
-          </aside>
+                {loaded.v.isNavikDeployment ? (
+                  <Check ok>
+                    A Navik release{loaded.v.releaseName && <>: <Mono>{loaded.v.releaseName}</Mono></>}
+                  </Check>
+                ) : (
+                  <Check>Not a Navik release: any ERC-8244 contract, read as is</Check>
+                )}
+                {loaded.v.belongsToProject !== undefined && (
+                  <Check ok={loaded.v.belongsToProject}>
+                    {loaded.v.belongsToProject ? 'Belongs to the named project' : 'Does not belong to the named project'}
+                  </Check>
+                )}
+                {loaded.v.isNavikDeployment && (
+                  <Check ok={loaded.v.hashMatches}>
+                    {loaded.v.hashMatches ? 'Content hash matches the release manifest' : 'Content hash does NOT match the manifest'}
+                  </Check>
+                )}
+                {loaded.v.original && <Check ok>gzip-wrapped: decompressed to {kb(loaded.v.original.html.length)}</Check>}
+              </ul>
+              <dl class="facts">
+                <dt>Size</dt>
+                <dd>{kb(loaded.v.html.length)}</dd>
+                <dt>keccak256</dt>
+                <dd>
+                  <Hash value={loaded.v.computedHash} chars={14} />
+                </dd>
+                <dt>Read</dt>
+                <dd>
+                  {loaded.calls} calls, {kb(loaded.bytes)} in {(loaded.ms / 1000).toFixed(1)} s{net && <> via {net.name}</>}
+                </dd>
+              </dl>
+              <CompareBuild v={loaded.v} result={compared} onResult={setCompared} />
+            </aside>
+            {ok && <SourcePanel ctx={ctx} v={loaded.v} isolationKey={`site:${name}`} wallet={wallet} compared={compared} />}
+          </div>
         </div>
       )}
     </div>
@@ -169,8 +175,8 @@ function Check(props: { ok?: boolean; children: ComponentChildren }) {
 }
 
 /** Drop a local build to check it is byte-identical to what is onchain (e.g. built from the repo). */
-function CompareBuild(props: { v: navik.Verification }) {
-  const [result, setResult] = useState<{ file: string; cmp: navik.BuildComparison }>()
+function CompareBuild(props: { v: navik.Verification; result?: Compared; onResult: (r: Compared) => void }) {
+  const { result, onResult: setResult } = props
   return (
     <div class="compare">
       <label class="drop small">

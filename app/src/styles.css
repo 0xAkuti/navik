@@ -318,3 +318,12 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .toasts.above-drawer { bottom: calc(70vh + 16px); }
   .release { flex-wrap: wrap; }
 }
+
+/* viewer: verification and source cards stacked in the side column */
+.side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.source .facts { margin-top: 0; }
+.source .facts dd { overflow-wrap: anywhere; }
+.attests { list-style: none; padding: 0; margin: 0 0 14px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.attests li { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.attests .icon { color: var(--ok); }
+.attests li.error .icon { color: var(--error); }

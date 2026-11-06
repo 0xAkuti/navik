@@ -156,7 +156,7 @@ export function App() {
       <main class={drawer ? 'with-drawer' : ''}>
         {viewing !== undefined ? (
           readCtx ? (
-            <Viewer ctx={readCtx} name={viewing} />
+            <Viewer ctx={readCtx} name={viewing} wallet={wallet && account ? { provider: wallet.provider, account } : undefined} />
           ) : (
             <p class="error">Navik is not deployed on chain {readChain}.</p>
           )
