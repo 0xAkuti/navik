@@ -183,6 +183,11 @@ export function SourcePanel(props: { ctx: navik.Ctx; v: navik.Verification; isol
                   <span class="muted small">
                     {a.commit ? `@ ${a.commit.slice(0, 8)} ` : ''}via {a.tool}
                   </span>
+                  {a.log?.startsWith('https://') && (
+                    <a class="ext small" href={a.log} target="_blank" rel="noopener noreferrer" title={a.log}>
+                      build log
+                    </a>
+                  )}
                   <a class="ext small" href={entityUrl(a.key)} target="_blank" rel="noopener noreferrer" title={`until ~${until(a.expiresAt)}`}>
                     entity
                   </a>
