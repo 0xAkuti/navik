@@ -17,6 +17,7 @@ promoted     portfolio.navik.eth → 3.portfolio.navik.eth
 - **Who may deploy is an ENSv2 permission.** The project owner grants a key "publish releases" and/or "change production", for that project only, and can revoke it at any time.
 - **Reading is private by default.** The dashboard and its built-in site viewer send every chain read through an [anon-rpc](https://ethereum.github.io/anon-rpc/) network (Nym by default). The RPC provider sees a mixnet exit, not who is looking at which project or site.
 - **Anyone can check that a site matches its source.** `navik verify <name> --against <build>` and `scripts/reproduce.sh` rebuild a site from its repo and compare it byte for byte with what the name serves.
+- **Real apps, one command, CI included.** With a `navik.json`, `navik deploy` builds a Vite app (React, viem, …), packs its `dist/` into one document and smoke-tests it in a sandboxed browser before spending gas. A GitHub Action previews every merge with a publish-only key and promotes after approval. See [Deploy a Vite app](#deploy-a-vite-app-and-from-ci).
 - **Provenance on Arkiv, source on Swarm.** `navik deploy --build <cmd>` records on [Arkiv](https://arkiv.network) which commit and command built a release, and puts the source on Swarm. Anyone who rebuilds it can attest the result, and the viewer shows "reproduced ×N" for any ERC-8244 site. See [Provenance](#provenance-on-arkiv-source-on-swarm).
 
 ## How it works
@@ -69,6 +70,36 @@ It is hosted on Navik itself:
 ```bash
 PRIVATE_KEY=0x… ./scripts/deploy-app.sh   # build for the connected chain, deploy compressed to app.navik.eth, promote
 ```
+
+## Deploy a Vite app (and from CI)
+
+A release stores one HTML document, so a site with a build directory gets packed into one at deploy time. Add a `navik.json` next to its `package.json` ([example](examples/viem-vite), React + viem):
+
+```json
+{ "project": "portfolio", "build": "pnpm install --frozen-lockfile && pnpm build", "output": "dist" }
+```
+
+```text
+$ navik deploy --smoke --promote
+build        pnpm install --frozen-lockfile && pnpm build
+packed       4 file(s) inlined into one document
+release      1.portfolio.navik.eth
+compressed   589362 → 259961 bytes (24 → 11 chunks)
+smoke        ✓ rendered in a sandboxed frame ("ENS lookup · a Navik example")
+uploaded 2 chunk(s) …
+promoted     portfolio.navik.eth → 1.portfolio.navik.eth
+```
+
+- **Packing** (`packSite` in the SDK) inlines scripts and stylesheets, and turns every other file the page references into a data URI: images, fonts, icons and JSON, whether referenced from HTML attributes, CSS `url()` or string literals in JS. It only rewrites paths that name a file in the build, and the same build always packs to the same bytes, so `navik verify --against dist/` and `navik reproduce` still compare byte for byte.
+- **Code splitting has to be off:** chunks load each other by URL, and an onchain site has none. Packing refuses such a build, names the chunk and says how to fix it. With Vite 8, that's `build.rolldownOptions.output.codeSplitting = false` (viem's lazy CCIP-Read module is one such chunk). Only `index.html` is served; other pages and unreferenced files are listed as left out.
+- **`--smoke`** loads the stored bytes (including the gzip loader) in headless Chromium, in a sandboxed frame with an opaque origin like the viewer's. It fails on uncaught errors, on requests for files that are not in the document, and on a blank page. It needs Playwright (`npx playwright install chromium`).
+- **Compression** is on for packed builds when it makes them smaller. A bundle with React and viem is ~590 KB, stored as 11 chunks (~58M gas on mainnet; a release that reuses stored chunks costs far less).
+- **CI-friendly:** `--json` prints the result on stdout, and in GitHub Actions the CLI writes step outputs and a job summary. If the bytes equal the latest release, nothing is published, so re-runs and commits that don't change the site cost nothing. `--max-gas-price <gwei>` stops before sending anything when gas is expensive.
+- **`navik build`** does the same without a chain: build, pack, report the size, `--smoke`, `--out site.html` (e.g. to drop on the viewer's "Compare with a local build").
+
+**GitHub Action.** [`action.yml`](action.yml) wraps this. [`examples/github-workflow.yml`](examples/github-workflow.yml) runs a dry run with smoke test on pull requests. On `main` it publishes a release with a key that may only publish, so `preview.<project>.navik.eth` follows it. After approval in a `production` environment, it promotes that exact release with a second key that may only promote. Both are [ENSv2 permissions](#ensv2-features-used) scoped to the project, so a leaked CI key cannot change what production serves. Its outputs are `release`, `version`, `address`, `content-hash`, `published`, `unchanged`, `promoted`, `preview` and `provenance`.
+
+**Outside this repo.** `pnpm -C cli bundle` builds `cli/dist/navik.js`, one file with the public Navik deployments embedded (`--deployment <file>` for others). `npm publish` ships it as `@navik/cli` (not on npm yet), for `npx @navik/cli deploy`. Until then, the Action builds the same file from its own checkout.
 
 ## Private reads (anon-rpc)
 
@@ -133,7 +164,8 @@ Ethereum proves which bytes a name serves, but not which code they came from. St
 export ARKIV_PRIVATE_KEY=0x…                 # tGLM from https://hub.arkiv.network/faucet; defaults to PRIVATE_KEY
 export SWARM_API=http://127.0.0.1:1633 SWARM_BATCH=<postage batch>   # bee or Freedom's antd; only for --swarm
 
-node cli/src/cli.ts deploy portfolio dist/index.html --build "npm ci && npm run build" --swarm --notes "v3"
+node cli/src/cli.ts deploy --provenance --swarm --notes "v3"   # build from navik.json; records its "build" and dist/
+node cli/src/cli.ts deploy portfolio dist/index.html --build "npm ci && npm run build" --swarm   # a file built yourself
 node cli/src/cli.ts record 2.portfolio dist/index.html --build "npm ci && npm run build"   # an existing release
 node cli/src/cli.ts provenance portfolio      # source, publisher check, reproductions (no key needed)
 node cli/src/cli.ts reproduce portfolio --yes --attest   # rebuild from Swarm (or --git), compare, attest
@@ -247,12 +279,14 @@ node src/cli.ts verify portfolio
 node src/cli.ts verify portfolio --against ./index.html      # is this build what's live?
 node src/cli.ts open 2.portfolio.navik.eth
 node src/cli.ts provenance portfolio                         # source and reproductions, from Arkiv
+(cd ../examples/viem-vite && node ../../cli/src/cli.ts deploy --smoke)   # build, pack and ship from navik.json
 
-# full CLI flow (claim → deploy → grants → rollback → multi-chunk → revoke → isolation → demote);
+# full CLI flow (claim → deploy → grants → rollback → multi-chunk → revoke → isolation → demote →
+# the Vite example from navik.json, smoke-tested → unchanged re-deploy → code splitting rejected);
 # with ARKIV_PRIVATE_KEY set (tGLM on Rabdi) also provenance → Swarm (local stand-in) → reproduce → attest
 pnpm run e2e
 
-# SDK: Arkiv calldata for browser wallets is byte-identical to the Arkiv SDK's
+# SDK: Arkiv calldata for browser wallets is byte-identical to the Arkiv SDK's; packing build directories
 pnpm -C ../sdk test
 
 # dashboard: dev server, or the headless-browser e2e (wallet injected; reads go through the
@@ -307,9 +341,9 @@ Measured on a mainnet fork:
 
 Mainnet caps a transaction at 2^24 gas (EIP-7825), so the CLI uploads at most 2 chunks per transaction. An upload interrupted halfway resumes: re-running `deploy` skips chunks that are already onchain.
 
-### Compression (opt-in)
+### Compression
 
-`navik deploy --compress`, or the "Compress" checkbox in the dashboard, stores the site gzip-wrapped. The stored document is a small loader page: the original HTML gzipped and base64-encoded, plus a script that decompresses it in the browser (`DecompressionStream`) and swaps it in. The loader keeps `window` intact, so wallet discovery (EIP-6963) and other listeners keep working; it re-runs the page's scripts in order and fires `DOMContentLoaded` and `load`.
+`navik deploy --compress` (the default for packed build directories, when it saves bytes), or the "Compress" checkbox in the dashboard, stores the site gzip-wrapped. The stored document is a small loader page: the original HTML gzipped and base64-encoded, plus a script that decompresses it in the browser (`DecompressionStream`) and swaps it in. The loader keeps `window` intact, so wallet discovery (EIP-6963) and other listeners keep working; it re-runs the page's scripts in order and fires `DOMContentLoaded` and `load`.
 
 | Site | Raw | Compressed |
 |---|---|---|
@@ -317,13 +351,13 @@ Mainnet caps a transaction at 2^24 gas (EIP-7825), so the CLI uploads at most 2 
 | Text-heavy page | 114 KB, 5 chunks, ~27M gas | 9 KB, 1 chunk, 2.2M gas |
 
 Trade-offs:
-- **It is off by default:** a compressed site needs JavaScript to render.
+- **It is off by default for a single HTML file:** a compressed site needs JavaScript to render. `--no-compress` turns it off for a build directory.
 - **Standard formats on purpose:** anyone can audit a release with `base64 -d | gunzip`.
 - **`navik verify` reports both hashes:** the stored loader's hash and the original document's hash. `--out`, `open` and the dashboard's "View" return the original; `--raw` returns the stored bytes.
 
 ## Limits (MVP)
 
-- **Single-file sites:** one prebuilt HTML document of up to 64 chunks (1,572,800 bytes).
+- **One document per site:** up to 64 chunks (1,572,800 bytes). Build directories are packed into it. Vite apps work with code splitting turned off; Next.js (its runtime loads chunks and RSC payloads by URL) and multi-page sites (only `index.html` is served) are not supported yet.
 - **Viewer sandbox:** sites opened in the dashboard run without wallet access. Sites that need a wallet render in ERC-8244 browsers or through `navik open`.
 - **Read integrity:** reads are anonymized but not proven. A lying RPC could serve a false release consistently with its manifest. A light client or `eth_getProof` checks would remove that trust.
 - **CLI reads are not anonymized** (no Node anon-rpc harness yet).
