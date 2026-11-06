@@ -434,7 +434,7 @@ async function siteRecords(c: navik.Ctx, v: navik.Verification) {
     navik.provenanceOf(arkiv, chainId, v.deployment),
     navik.attestationsOf(arkiv, chainId, v.contentHash),
     v.isNavikDeployment ? navik.publisherOf(c, v.deployment) : undefined,
-    arkiv.getBlockNumber(),
+    navik.arkivBlock(arkiv),
   ])
   const trusted = navik.trustedProvenance(provenance, publisher)
   const expires = (at: bigint) => navik.expiryDate(at, block).toISOString().slice(0, 10)

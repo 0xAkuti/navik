@@ -1,15 +1,22 @@
-import {
-  createPublicClient,
-  createWalletClient,
-  ExpirationTime,
-  type PublicArkivClient,
-  type WalletArkivClient,
-} from '@arkiv-network/sdk'
+import { createWalletClient, ExpirationTime, SelectQueryBuilder, type WalletArkivClient } from '@arkiv-network/sdk'
 import { rabdi } from '@arkiv-network/sdk/chains'
 import { and, eq } from '@arkiv-network/sdk/query'
 import { addr, bytes, defineSchema, key, str, u64 } from '@arkiv-network/sdk/schema'
-import type { Account, Address, Chain, Hex, Transport } from 'viem'
-import { getAddress, hexToString, stringToBytes } from 'viem'
+import type { Account, Address, Chain, Client, Hex, Transport } from 'viem'
+import {
+  createClient,
+  decodeEventLog,
+  encodeAbiParameters,
+  encodeFunctionData,
+  getAddress,
+  hexToString,
+  pad,
+  parseAbi,
+  parseAbiParameters,
+  stringToBytes,
+  toHex,
+} from 'viem'
+import { getBlockNumber } from 'viem/actions'
 
 /**
  * Release metadata that does not belong in contract bytecode (source repo, commit, build command,
@@ -81,13 +88,19 @@ export const AttestationSchema = defineSchema('navik.attestation', {
   tool: str(),
 })
 
-export type ArkivRead = PublicArkivClient<Transport, Chain>
+/**
+ * A plain viem client: queries are built on it directly rather than through Arkiv's decorated
+ * public client, which would pull every viem action into browser bundles.
+ */
+export type ArkivRead = Client<Transport, Chain>
 export type ArkivWrite = WalletArkivClient<Transport, Chain, Account>
 
 /** A read client for Arkiv over any viem transport (the dashboard passes its anon-rpc one). */
 export function arkivReader(transport: Transport, chain: Chain = arkivChain()): ArkivRead {
-  return createPublicClient({ chain, transport }) as ArkivRead
+  return createClient({ chain, transport })
 }
+
+const select = (arkiv: ArkivRead) => new SelectQueryBuilder(arkiv as never)
 
 /** A write client: `account` is a local key (CLI) or a JSON-RPC account behind a wallet transport. */
 export function arkivWriter(transport: Transport, account: Account | Address, chain: Chain = arkivChain()): ArkivWrite {
@@ -144,8 +157,7 @@ const PAGE = 100
 
 /** Provenance written for a release contract (anyone can write one; see `trustedProvenance`). */
 export async function provenanceOf(arkiv: ArkivRead, chainId: number, site: Address): Promise<Provenance[]> {
-  const page = await arkiv
-    .select()
+  const page = await select(arkiv)
     .from(ProvenanceSchema)
     .where(and(eq('chainId', u64(BigInt(chainId))), eq('site', addr(getAddress(site)))))
     .limit(PAGE)
@@ -155,8 +167,7 @@ export async function provenanceOf(arkiv: ArkivRead, chainId: number, site: Addr
 
 /** Every release's provenance under a production name, e.g. portfolio.navik.eth. */
 export async function provenanceOfProject(arkiv: ArkivRead, chainId: number, project: string): Promise<Provenance[]> {
-  const page = await arkiv
-    .select()
+  const page = await select(arkiv)
     .from(ProvenanceSchema)
     .where(and(eq('chainId', u64(BigInt(chainId))), eq('project', project)))
     .limit(PAGE)
@@ -166,8 +177,7 @@ export async function provenanceOfProject(arkiv: ArkivRead, chainId: number, pro
 
 /** Everyone who rebuilt these exact bytes (or tried to): keyed by content, so any ERC-8244 site works. */
 export async function attestationsOf(arkiv: ArkivRead, chainId: number, contentHash: Hex): Promise<Attestation[]> {
-  const page = await arkiv
-    .select()
+  const page = await select(arkiv)
     .from(AttestationSchema)
     .where(and(eq('chainId', u64(BigInt(chainId))), eq('contentHash', key(contentHash))))
     .limit(PAGE)
@@ -187,6 +197,11 @@ export function trustedProvenance(records: Provenance[], publisher: Address | un
     .sort((a, b) => Number(b.expiresAt - a.expiresAt))[0]
 }
 
+/** Arkiv's current block, to turn `expiresAt` into a date. */
+export function arkivBlock(arkiv: ArkivRead): Promise<bigint> {
+  return getBlockNumber(arkiv, { cacheTime: 0 })
+}
+
 /** Approximate wall-clock expiry (Arkiv produces a block every ~2 s). */
 export function expiryDate(expiresAt: bigint, currentBlock: bigint, now = Date.now()): Date {
   return new Date(now + Number(expiresAt - currentBlock) * ARKIV_BLOCK_SECONDS * 1000)
@@ -197,54 +212,144 @@ export function expiryDate(expiresAt: bigint, currentBlock: bigint, now = Date.n
 const lifetime = () => ExpirationTime.fromDays(ARKIV_LIFETIME_DAYS)
 const flags = { readonly: true, permissionlessExtension: true }
 
-export async function recordProvenance(arkiv: ArkivWrite, p: ProvenanceInput) {
+function provenanceValues(p: ProvenanceInput) {
   for (const field of ['name', 'project', 'repo', 'commit', 'build', 'output', 'sourceSwarm'] as const) checkStr(field, p[field])
-  return arkiv.createEntity(
-    ProvenanceSchema,
-    {
-      chainId: u64(BigInt(p.chainId)),
-      site: addr(getAddress(p.site)),
-      contentHash: key(p.contentHash),
-      name: p.name,
-      project: p.project,
-      version: u64(p.version),
-      repo: p.repo,
-      commit: p.commit,
-      build: p.build,
-      output: p.output,
-      ...(p.sourceSwarm ? { sourceSwarm: p.sourceSwarm } : {}),
-      ...(p.sourceHash ? { sourceHash: key(p.sourceHash) } : {}),
-      ...(p.notes ? { notes: bytes(stringToBytes(p.notes)) } : {}),
-    },
-    { expiration: lifetime(), flags },
-  )
+  return {
+    chainId: u64(BigInt(p.chainId)),
+    site: addr(getAddress(p.site)),
+    contentHash: key(p.contentHash),
+    name: str(p.name),
+    project: str(p.project),
+    version: u64(p.version),
+    repo: str(p.repo),
+    commit: str(p.commit),
+    build: str(p.build),
+    output: str(p.output),
+    ...(p.sourceSwarm ? { sourceSwarm: str(p.sourceSwarm) } : {}),
+    ...(p.sourceHash ? { sourceHash: key(p.sourceHash) } : {}),
+    ...(p.notes ? { notes: bytes(stringToBytes(p.notes)) } : {}),
+  }
+}
+
+function attestationValues(a: AttestationInput) {
+  for (const field of ['name', 'repo', 'commit', 'build', 'tool'] as const) checkStr(field, a[field])
+  return {
+    chainId: u64(BigInt(a.chainId)),
+    site: addr(getAddress(a.site)),
+    contentHash: key(a.contentHash),
+    name: str(a.name),
+    result: str(a.result),
+    builtHash: key(a.builtHash),
+    tool: str(a.tool),
+    ...(a.provenance ? { provenance: key(a.provenance) } : {}),
+    ...(a.repo ? { repo: str(a.repo) } : {}),
+    ...(a.commit ? { commit: str(a.commit) } : {}),
+    ...(a.build ? { build: str(a.build) } : {}),
+  }
+}
+
+export async function recordProvenance(arkiv: ArkivWrite, p: ProvenanceInput) {
+  return arkiv.createEntity(ProvenanceSchema, provenanceValues(p), { expiration: lifetime(), flags })
 }
 
 export async function attest(arkiv: ArkivWrite, a: AttestationInput) {
-  for (const field of ['name', 'repo', 'commit', 'build', 'tool'] as const) checkStr(field, a[field])
-  return arkiv.createEntity(
-    AttestationSchema,
-    {
-      chainId: u64(BigInt(a.chainId)),
-      site: addr(getAddress(a.site)),
-      contentHash: key(a.contentHash),
-      name: a.name,
-      result: a.result,
-      builtHash: key(a.builtHash),
-      tool: a.tool,
-      ...(a.provenance ? { provenance: key(a.provenance) } : {}),
-      ...(a.repo ? { repo: a.repo } : {}),
-      ...(a.commit ? { commit: a.commit } : {}),
-      ...(a.build ? { build: a.build } : {}),
-    },
-    { expiration: lifetime(), flags },
-  )
+  return arkiv.createEntity(AttestationSchema, attestationValues(a), { expiration: lifetime(), flags })
 }
 
 /** Pushes entities' expiry out to the maximum lifetime; works for any account (permissionlessExtension). */
 export async function keepAlive(arkiv: ArkivWrite, keys: Hex[]) {
   if (keys.length === 0) return undefined
   return arkiv.executeBatch({ extensions: keys.map((entityKey) => ({ entityKey, expiration: lifetime() })) })
+}
+
+// ------------------------------------------------- writes without Arkiv's wallet client
+//
+// Arkiv's wallet client extends viem's full public and wallet actions, which adds ~70 KB
+// (gzipped) to a browser bundle: three more onchain chunks for the dashboard. A create or an
+// extension is one `execute` call, so the dashboard builds the calldata here and hands it to the
+// wallet. test/arkiv-encoding.test.ts checks it is byte-identical to what the Arkiv SDK sends.
+
+export const ARKIV_ADDRESS: Address = '0x4400000000000000000000000000000000000044'
+const executeAbi = parseAbi(['function execute((uint8 operation, bytes operationData)[] ops) external returns (bytes32[] keys)'])
+const createParams = parseAbiParameters(
+  '(uint128 salt, uint64 expiresAt, uint64 minLifetime, uint8 creationFlags, (bytes32 name, uint8 typeId, bytes value)[] attributes)',
+)
+const extendParams = parseAbiParameters('(bytes32 entityKey, uint64 expiresAt, uint64 minLifetime)')
+const OP_CREATE = 1
+const OP_EXTEND = 3
+const TYPE_ID = { u64: 3, bytes: 7, str: 8, addr: 9, key: 10 } as const
+const INDEXED = 0x80
+// readonly | permissionlessExtension
+const CREATION_FLAGS = 0b11
+const lifetimeBlocks = () => BigInt((ARKIV_LIFETIME_DAYS * 24 * 60 * 60) / ARKIV_BLOCK_SECONDS)
+
+export type ArkivCall = { to: Address; data: Hex }
+
+export const provenanceCall = (p: ProvenanceInput, salt = randomSalt128()): ArkivCall =>
+  createCall(ProvenanceSchema, provenanceValues(p), salt)
+
+export const attestationCall = (a: AttestationInput, salt = randomSalt128()): ArkivCall =>
+  createCall(AttestationSchema, attestationValues(a), salt)
+
+export function keepAliveCall(keys: Hex[]): ArkivCall {
+  const ops = keys.map((entityKey) => ({
+    operation: OP_EXTEND,
+    operationData: encodeAbiParameters(extendParams, [{ entityKey, expiresAt: 0n, minLifetime: lifetimeBlocks() }]),
+  }))
+  return { to: ARKIV_ADDRESS, data: encodeFunctionData({ abi: executeAbi, functionName: 'execute', args: [ops] }) }
+}
+
+type Value = { type: string; value: unknown }
+
+function createCall(schema: { tag?: Value; columns: Record<string, { isIndexed: boolean; isOptional: boolean }> }, values: Record<string, Value>, salt: bigint): ArkivCall {
+  const attributes = [
+    ...(schema.tag ? [attribute('arkiv.schema', schema.tag, true)] : []),
+    ...Object.entries(schema.columns).flatMap(([name, column]) => {
+      const value = values[name]
+      if (value === undefined && !column.isOptional) throw new Error(`missing required Arkiv column ${name}`)
+      return value === undefined ? [] : [attribute(name, value, column.isIndexed)]
+    }),
+  ].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+  const operationData = encodeAbiParameters(createParams, [
+    { salt, expiresAt: 0n, minLifetime: lifetimeBlocks(), creationFlags: CREATION_FLAGS, attributes },
+  ])
+  return { to: ARKIV_ADDRESS, data: encodeFunctionData({ abi: executeAbi, functionName: 'execute', args: [[{ operation: OP_CREATE, operationData }]] }) }
+}
+
+function attribute(name: string, v: Value, indexed: boolean) {
+  const type = v.type as keyof typeof TYPE_ID
+  const value: Hex =
+    type === 'u64'
+      ? toHex(v.value as bigint, { size: 32 })
+      : type === 'addr'
+        ? pad((v.value as string).toLowerCase() as Hex, { size: 32 })
+        : type === 'str'
+          ? toHex(stringToBytes(v.value as string))
+          : (v.value as Hex) // key, bytes
+  if (!(type in TYPE_ID)) throw new Error(`unsupported Arkiv type ${v.type}`)
+  return { name: toHex(name, { size: 32 }), typeId: TYPE_ID[type] | (indexed ? INDEXED : 0), value }
+}
+
+function randomSalt128(): bigint {
+  return BigInt(toHex(crypto.getRandomValues(new Uint8Array(16))))
+}
+
+const entityEvents = parseAbi([
+  'event EntityCreated(bytes32 indexed entityKey, address indexed owner, uint64 expiresAt, uint8 creationFlags)',
+])
+
+/** The key of the entity a create transaction made, from its receipt. */
+export function createdEntityKey(logs: readonly { address: Address; topics: readonly Hex[]; data: Hex }[]): Hex | undefined {
+  for (const log of logs) {
+    if (getAddress(log.address) !== ARKIV_ADDRESS) continue
+    try {
+      const ev = decodeEventLog({ abi: entityEvents, topics: log.topics as [Hex, ...Hex[]], data: log.data })
+      return ev.args.entityKey
+    } catch {
+      // another engine event
+    }
+  }
+  return undefined
 }
 
 // ---------------------------------------------------------------- helpers
