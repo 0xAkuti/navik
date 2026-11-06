@@ -70,7 +70,7 @@ The dashboard is also a viewer for onchain sites: "Open a site" takes any ENS na
 You can drop a local build on the viewer to compare it with the release, then attest the result on Arkiv with your wallet.
 
 It is hosted on Navik itself:
-- The build is one self-contained HTML file (~350 KB, published compressed as 6 chunks, ~33M gas), with no CDN, web fonts or analytics: system fonts and inline SVG icons keep it small. Names and addresses get the ENS app's [etherloom](https://github.com/ensdomains/etherloom) identicons (generated locally, ~3.6 KB), addresses link to Blockscout, and every address and hash has a copy button. Its only external fetch is the pinned anon-rpc worker code.
+- The build is one self-contained HTML file (~350 KB, published compressed as 6 chunks, ~33M gas), with no CDN, web fonts or analytics: system fonts and inline SVG icons keep it small. Names and addresses get the ENS app's [etherloom](https://github.com/ensdomains/etherloom) identicons (generated locally, ~3.6 KB). Project owners, deploy keys, publishers and attesters show as their primary ENS name (e.g. "reproduced by vitalik.eth"), looked up through anon-rpc like every other read. Addresses link to Blockscout, and every address and hash has a copy button. Its only external fetch is the pinned anon-rpc worker code.
 - It is published to the root project `app.navik.eth`, so `navik.eth` serves it.
 - Every version of the dashboard keeps its own permanent name (`1.app.navik.eth`, …).
 - The build is reproducible, so anyone can check that `navik.eth` serves the code in this repo (see [Verify a site against its source](#verify-a-site-against-its-source)).
