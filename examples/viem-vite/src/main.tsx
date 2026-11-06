@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client'
 import { type Address, createPublicClient, createWalletClient, custom, type EIP1193Provider, http } from 'viem'
 import { mainnet } from 'viem/chains'
 import { normalize } from 'viem/ens'
+import '@fontsource/inter/latin-400.css'
+import '@fontsource/inter/latin-600.css'
 import './style.css'
 
 // viem's default public RPC for mainnet; any CORS-enabled endpoint works from an onchain site
