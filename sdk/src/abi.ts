@@ -14,7 +14,15 @@ export const registryAbi = parseAbi([
   'function getSubregistry(string label) view returns (address)',
   'function roleCount(uint256 anyId) view returns (uint256)',
   'function isEmancipated() view returns (bool)',
+  'function hasRoles(uint256 anyId, uint256 roleBitmap, address account) view returns (bool)',
+  'function setSubregistry(uint256 anyId, address registry)',
+  'function setResolver(uint256 anyId, address resolver)',
+  'error EACUnauthorizedAccountRoles(uint256 resource, uint256 roleBitmap, address account)',
 ])
+
+/** ENSv2Roles: change a name's subregistry / resolver. */
+export const ROLE_SET_SUBREGISTRY = 1n << 20n
+export const ROLE_SET_RESOLVER = 1n << 24n
 
 /** Roles on the root name that can repoint the namespace (set subregistry/resolver + admins). */
 export const ROOT_CONTROL_ROLES = (1n << 20n) | ((1n << 20n) << 128n) | (1n << 24n) | ((1n << 24n) << 128n)
@@ -58,7 +66,15 @@ export const resolverAbi = parseAbi([
   'function grantSetterRoles(bytes setter, address account) returns (bool)',
   'function revokeRoles(uint256 resource, uint256 roleBitmap, address account) returns (bool)',
   'function hasRoles(uint256 resource, uint256 roleBitmap, address account) view returns (bool)',
+  'function hasRootRoles(uint256 roleBitmap, address account) view returns (bool)',
+  'function resolve(bytes name, bytes data) view returns (bytes)',
+  'function linkToNode(bytes name, bytes32 node)',
+  'function linkToRecord(bytes name, uint256 recordId)',
+  'function getRecordId(bytes32 node) view returns (uint256)',
+  'function multicall(bytes[] calls) returns (bytes[] results)',
   'event EACRolesChanged(uint256 indexed resource, address indexed account, uint256 oldRoleBitmap, uint256 newRoleBitmap)',
+  'event Linked(uint256 indexed recordId, bytes32 indexed node, bytes name)',
+  'error InvalidRecord()',
   'error EACUnauthorizedAccountRoles(uint256 resource, uint256 roleBitmap, address account)',
   'error EACCannotGrantRoles(uint256 resource, uint256 roleBitmap, address account)',
   'error EACCannotRevokeRoles(uint256 resource, uint256 roleBitmap, address account)',
@@ -66,6 +82,8 @@ export const resolverAbi = parseAbi([
 
 /** PermissionedResolverLib.ROLE_SET_TEXT */
 export const ROLE_SET_TEXT = 1n << 4n
+/** PermissionedResolverLib.ROLE_LINK: point another name at one of the resolver's records. */
+export const ROLE_LINK = 1n << 28n
 
 export const universalResolverAbi = parseAbi([
   'function resolve(bytes name, bytes data) view returns (bytes result, address resolver)',

@@ -1,4 +1,4 @@
-import { type Hex, keccak256, toBytes, toHex } from 'viem'
+import { type Hex, hexToBytes, keccak256, toBytes, toHex } from 'viem'
 
 /** DNS wire-format encoding used by ENS (ENSIP-10). */
 export function dnsEncode(name: string): Hex {
@@ -11,6 +11,16 @@ export function dnsEncode(name: string): Hex {
   }
   parts.push(0)
   return toHex(new Uint8Array(parts))
+}
+
+/** Inverse of dnsEncode: `0x05616c69636503657468 00` → `alice.eth`. */
+export function dnsDecode(dns: Hex): string {
+  const bytes = hexToBytes(dns)
+  const labels: string[] = []
+  for (let i = 0; i < bytes.length && bytes[i] !== 0; i += bytes[i] + 1) {
+    labels.push(new TextDecoder().decode(bytes.subarray(i + 1, i + 1 + bytes[i])))
+  }
+  return labels.join('.')
 }
 
 /** EAC resource for a text key on a Permissioned Resolver. */
