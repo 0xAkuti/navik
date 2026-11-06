@@ -17,6 +17,17 @@ type Data = {
 
 const same = (a?: Address, b?: Address) => !!a && !!b && getAddress(a) === getAddress(b)
 
+/** The name's public link. Opens outside the dashboard: eth.limo's RPC and CDN see that visit. */
+function LimoLink({ ctx, name }: { ctx: navik.Ctx; name: string }) {
+  const url = navik.limoUrl(ctx, name)
+  if (!url) return null
+  return (
+    <a class="btn ghost sm" href={url} target="_blank" rel="noreferrer" title={`Public link, through the eth.limo gateway: ${url}`}>
+      eth.limo <Icon name="arrow" size={12} />
+    </a>
+  )
+}
+
 export function ProjectView(props: { ctx: navik.Ctx; project: string; tab?: string; account: Address; run: Run; busy: boolean }) {
   const { ctx, project, account, run, busy } = props
   const [data, setData] = useState<Data>()
@@ -150,7 +161,7 @@ function Production(props: { ctx: navik.Ctx; project: string; data: Data; busy: 
               <a href={`#/open/${name}`}>
                 <Mono>{name}</Mono>
               </a>{' '}
-              <span class="muted">→</span> <Mono>{live?.name ?? data.live}</Mono>
+              <span class="muted">→</span> <Mono>{live?.name ?? data.live}</Mono> <LimoLink ctx={ctx} name={name} />
             </>
           ) : (
             <span class="muted">Nothing is live. Deploy a release and promote it.</span>
@@ -244,6 +255,7 @@ function Releases(props: { ctx: navik.Ctx; project: string; data: Data; busy: bo
                   <a class="btn ghost sm" href={`#/open/${r.name}`}>
                     View
                   </a>
+                  <LimoLink ctx={ctx} name={r.name} />
                   {!isLive && data.perms.promote && (
                     <button class="btn sm" disabled={busy} onClick={() => act(`Promoting ${r.name}`, () => navik.promote(ctx, project, r.deployment))}>
                       {live && r.version < live.version ? 'Roll back' : 'Promote'}
