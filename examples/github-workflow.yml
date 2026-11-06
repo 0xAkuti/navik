@@ -45,9 +45,8 @@ jobs:
           private-key: ${{ github.event_name == 'push' && secrets.NAVIK_PUBLISH_KEY || '' }}
           dry-run: ${{ github.event_name == 'pull_request' }}
           max-gas-price: 3
-          # record the commit and build command on Arkiv, so anyone can `navik reproduce` it
-          # (the publish key needs tGLM on Arkiv; set ARKIV_ACCESS_KEY in env to avoid rate limits)
-          provenance: ${{ github.event_name == 'push' }}
+          # a public repo and tGLM on Arkiv for the publish key also record the commit and build
+          # command, so anyone can `navik reproduce` it; `provenance: false` turns that off
 
   reproduce:
     needs: release

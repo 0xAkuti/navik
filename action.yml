@@ -36,8 +36,8 @@ inputs:
     description: Send nothing if gas costs more than this many gwei
     default: ''
   provenance:
-    description: Record the commit and build command on Arkiv (needs arkiv-private-key, or private-key with tGLM)
-    default: 'false'
+    description: Record the commit and build command on Arkiv. auto records it when the repo is public and the key has tGLM, true fails if it cannot, false never records
+    default: auto
   swarm:
     description: With provenance, also put the source on Swarm (needs SWARM_API and SWARM_BATCH in env)
     default: 'false'
@@ -142,6 +142,8 @@ runs:
         [[ "$SMOKE" == true ]] && args+=(--smoke)
         [[ "$SKIP_BUILD" == true ]] && args+=(--skip-build)
         [[ -n "$MAX_GAS_PRICE" ]] && args+=(--max-gas-price "$MAX_GAS_PRICE")
-        [[ "$PROVENANCE" == true ]] && args+=(--provenance --notes "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
+        [[ "$PROVENANCE" == true ]] && args+=(--provenance)
+        [[ "$PROVENANCE" == false ]] && args+=(--no-provenance)
+        [[ "$PROVENANCE" != false ]] && args+=(--notes "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
         [[ "$SWARM" == true ]] && args+=(--swarm)
         node "$NAVIK" deploy "${args[@]}"
