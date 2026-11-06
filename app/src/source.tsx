@@ -4,7 +4,7 @@ import { useEffect, useState } from 'preact/hooks'
 import type { Address, EIP1193Provider } from 'viem'
 
 import { arkivRead, entityUrl, onArkiv, sendArkiv } from './arkiv.ts'
-import { ARKIV_CHAIN_ID, networkById, useReads } from './reads.ts'
+import { ARKIV_CHAIN_ID, networkById, reconnect, useReads } from './reads.ts'
 import { Badge, Hash, Icon, Mono, Spinner, Who } from './ui.tsx'
 
 export type Wallet = { provider: EIP1193Provider; account: Address }
@@ -34,22 +34,29 @@ export function SourcePanel(props: { ctx: navik.Ctx; v: navik.Verification; isol
   const [reload, setReload] = useState(0)
   const chainId = ctx.deployment.chainId
   const arkivNet = reads.routes[ARKIV_CHAIN_ID] && networkById(reads.routes[ARKIV_CHAIN_ID].network)
+  const retry = () => {
+    if (arkivNet && reads.phases[arkivNet.id]?.phase === 'failed') reconnect()
+    setReload((n) => n + 1)
+  }
 
   useEffect(() => {
     let cancelled = false
     setError(undefined)
     const arkiv = arkivRead(isolationKey)
+    // two sources: say which one failed
+    const from = <T,>(source: string, read: Promise<T>) =>
+      read.catch((err) => {
+        throw new Error(`${source}: ${navik.describeError(err)}`)
+      })
     Promise.all([
-      navik.provenanceOf(arkiv, chainId, v.deployment),
-      navik.attestationsOf(arkiv, chainId, v.contentHash),
-      v.isNavikDeployment ? navik.publisherOf(ctx, v.deployment) : undefined,
-      navik.arkivBlock(arkiv),
+      from('Arkiv', Promise.all([navik.provenanceOf(arkiv, chainId, v.deployment), navik.attestationsOf(arkiv, chainId, v.contentHash), navik.arkivBlock(arkiv)])),
+      v.isNavikDeployment ? from('Ethereum', navik.publisherOf(ctx, v.deployment)) : undefined,
     ])
-      .then(([provenance, attestations, publisher, block]) => {
+      .then(([[provenance, attestations, block], publisher]) => {
         if (cancelled) return
         setRecords({ provenance, attestations, publisher, block, trusted: navik.trustedProvenance(provenance, publisher) })
       })
-      .catch((err) => !cancelled && setError(navik.describeError(err)))
+      .catch((err) => !cancelled && setError((err as Error).message))
     return () => {
       cancelled = true
     }
@@ -83,7 +90,7 @@ export function SourcePanel(props: { ctx: navik.Ctx; v: navik.Verification; isol
       <div class="row">
         <h3>Source</h3>
         <span class="spacer" />
-        {records && (
+        {records && !error && (
           <Badge tone={matches.length && !mismatches.length ? 'ok' : mismatches.length ? 'warn' : 'muted'}>
             {matches.length ? `reproduced ×${matches.length}` : p ? 'not reproduced yet' : 'no provenance'}
           </Badge>
@@ -97,12 +104,14 @@ export function SourcePanel(props: { ctx: navik.Ctx; v: navik.Verification; isol
       )}
       {error && (
         <p class="muted small">
-          Arkiv is unreachable, so no provenance is shown; the site itself is verified on Ethereum above.{' '}
-          <span class="error">{error}</span>
+          Provenance is unavailable; the site itself is verified on Ethereum above. <span class="error">{error}</span>{' '}
+          <button class="btn sm" onClick={retry}>
+            Retry
+          </button>
         </p>
       )}
 
-      {records && (
+      {records && !error && (
         <>
           <ul class="checks">
             {p ? (
