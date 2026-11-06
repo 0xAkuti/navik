@@ -59,7 +59,7 @@ The dashboard is also a viewer for onchain sites: "Open a site" takes any ENS na
 You can drop a local build on the viewer to compare it with the release.
 
 It is hosted on Navik itself:
-- The build is one self-contained HTML file (~285 KB, published compressed as 5 chunks, ~26M gas), with no CDN, web fonts or analytics: system fonts, inline SVG icons and CSS gradient avatars keep it small. Its only external fetch is the pinned anon-rpc worker code.
+- The build is one self-contained HTML file (~296 KB, published compressed as 5 chunks, ~27M gas), with no CDN, web fonts or analytics: system fonts and inline SVG icons keep it small. Names and addresses get the ENS app's [etherloom](https://github.com/ensdomains/etherloom) identicons (generated locally, ~3.6 KB), addresses link to Blockscout, and every address and hash has a copy button. Its only external fetch is the pinned anon-rpc worker code.
 - It is published to the root project `app.navik.eth`, so `navik.eth` serves it.
 - Every version of the dashboard keeps its own permanent name (`1.app.navik.eth`, …).
 - The build is reproducible, so anyone can check that `navik.eth` serves the code in this repo (see [Verify a site against its source](#verify-a-site-against-its-source)).
@@ -219,7 +219,7 @@ node ../cli/src/cli.ts verify navik.eth --raw --out /tmp/navik.html && APP_FILE=
 
    This deploys the contracts and points navik.eth at them. It writes `contracts/deployments/1.json`, which the CLI reads, plus `1-<block>.json` as a record. Commit both: the dashboard build embeds `1.json`, so a reproducible build needs it.
 
-3. Publish the dashboard so `navik.eth` serves it (~26M gas), then check it against the commit:
+3. Publish the dashboard so `navik.eth` serves it (~27M gas), then check it against the commit:
 
    ```bash
    RPC_URL=$MAINNET_RPC_URL PRIVATE_KEY=$OWNER_KEY ./scripts/deploy-app.sh
@@ -257,7 +257,7 @@ Mainnet caps a transaction at 2^24 gas (EIP-7825), so the CLI uploads at most 2 
 
 | Site | Raw | Compressed |
 |---|---|---|
-| Navik dashboard (JS bundle, incl. the anon-rpc harness) | 285 KB, 12 chunks | 116 KB, 5 chunks (~26M gas) |
+| Navik dashboard (JS bundle, incl. the anon-rpc harness) | 296 KB, 13 chunks | 121 KB, 5 chunks (~27M gas) |
 | Text-heavy page | 114 KB, 5 chunks, ~27M gas | 9 KB, 1 chunk, 2.2M gas |
 
 Trade-offs:
