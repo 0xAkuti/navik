@@ -171,6 +171,16 @@ export async function listReleases(
   return { releases, live, preview }
 }
 
+/** The newest release of a project, if any: what a redeploy of unchanged bytes would duplicate. */
+export async function latestRelease(ctx: Ctx, project: string): Promise<Release | undefined> {
+  const node = await projectNode(ctx, project)
+  const version = await read<bigint>(ctx, ctx.deployment.factory, factoryAbi, 'versionCount', [node])
+  if (version === 0n) return undefined
+  const deployment = await read<Address>(ctx, ctx.deployment.factory, factoryAbi, 'predict', [node, version])
+  const [, , contentHash, size, pointers] = await read<Manifest>(ctx, deployment, deploymentAbi, 'manifest')
+  return { version, name: releaseName(ctx, project, version), deployment, contentHash, size, chunks: pointers.length }
+}
+
 export type ProjectSummary = { releases: number; live?: Address; liveVersion?: bigint }
 
 /** What a project overview card shows: release count and what production serves. */
