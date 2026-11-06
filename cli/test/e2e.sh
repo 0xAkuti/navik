@@ -128,6 +128,23 @@ fails as "$TEAM" deploy "$PROJECT" "$WORK/v2.html"
 fails as "$TEAM" promote "$PROJECT" v2
 fails as "$MALLORY" promote "$PROJECT" v2
 
+step "eth.limo (a replica on the gateway's own libraries): production and releases, as served to a browser"
+GATEWAY_DIR="$CLI_DIR/test/gateway"
+[[ -d "$GATEWAY_DIR/node_modules" ]] || npm --prefix "$GATEWAY_DIR" install --silent --no-audit --no-fund
+node "$GATEWAY_DIR/server.ts" "$RPC_URL" 8588 &
+GATEWAY=$!
+trap 'kill $GATEWAY 2>/dev/null' EXIT
+for _ in $(seq 1 50); do curl -s -o /dev/null http://127.0.0.1:8588/ && break; sleep 0.2; done
+limo() { curl -sf -H "Host: $1.localhost:8588" http://127.0.0.1:8588/; }
+serves() { [[ "$(limo "$1")" == *"$2"* ]] || { echo "$1 should serve \"$2\", got: $(limo "$1")" >&2; exit 1; }; echo "  $1: $2"; }
+FULL="$PROJECT.navik.eth"
+serves "$FULL" "hello v1"
+serves "2.$FULL" "hello v2"
+as "$ALICE" promote "$PROJECT" v2 >/dev/null
+serves "$FULL" "hello v2"
+as "$ALICE" promote "$PROJECT" v1 >/dev/null
+serves "$FULL" "hello v1"
+
 step "custom domain: alice links her own .eth name; it serves production and every release"
 ETH_REGISTRY=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).ethRegistry)' "$ROOT_DIR/contracts/deployments/$(cast chain-id --rpc-url "$RPC_URL").json")
 ETH_REGISTRAR=0xD6D8369e55c94Ae8AFA714E6cF7AB5bE54D5CC81
@@ -161,6 +178,9 @@ echo "  the domain follows promotions"
 as "$ALICE" rollback "$PROJECT" v1 >/dev/null
 navik domains "$PROJECT" | grep -q "● $DOMAIN" && echo "  listed under the project's domains"
 
+serves "$DOMAIN" "hello v1"
+serves "2.$DOMAIN" "hello v2"
+
 step "custom domain owned by someone else: each owner does their part"
 DOMAIN2="${PROJECT}team.eth"
 register_eth "${PROJECT}team" "$(address "$MALLORY")"
@@ -178,6 +198,9 @@ navik resolve "$DOMAIN" | grep -q "(none)" && echo "  $DOMAIN no longer serves t
 echo "  resolver $OLD_RESOLVER and empty subregistry restored"
 navik domains "$PROJECT" | grep -q "$DOMAIN " && { echo "$DOMAIN should not be listed" >&2; exit 1; }
 echo "  no longer listed"
+
+kill $GATEWAY 2>/dev/null
+trap - EXIT
 
 step "demote: production cleared, releases stay"
 as "$ALICE" demote "$PROJECT"

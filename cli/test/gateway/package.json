@@ -1,0 +1,11 @@
+{
+  "name": "navik-limo-gateway-test",
+  "private": true,
+  "type": "module",
+  "description": "Outside the pnpm workspace: @ethlimo/ens-hooks has a git subdependency. Same versions as ethlimo/dweb-proxy-api.",
+  "dependencies": {
+    "@ensdomains/ethers-patch-v6": "0.0.4",
+    "@ethlimo/ens-hooks": "0.1.15",
+    "ethers": "^6.13.5"
+  }
+}
