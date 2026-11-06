@@ -15,7 +15,7 @@ promoted     portfolio.navik.eth → 3.portfolio.navik.eth
 - **Every release gets a permanent name:** `<N>.<project>.navik.eth`, a real ENSv2 subname in the project's own registry, with no expiry and no roles. Nobody can change, transfer or remove it, including us and the project owner. `preview.<project>.navik.eth` follows the newest release.
 - **Production is `<project>.navik.eth`.** It is one `contentcontract` text record on the project's own ENSv2 Permissioned Resolver, so promote, rollback and demote are each one ENS write.
 - **Who may deploy is an ENSv2 permission.** The project owner grants a key "publish releases" and/or "change production", for that project only, and can revoke it at any time.
-- **Reading is private by default.** The dashboard and its built-in site viewer send every chain read through an [anon-rpc](https://ethereum.github.io/anon-rpc/) network (Nym by default). The RPC provider sees a mixnet exit, not who is looking at which project or site.
+- **Reading is private by default.** The dashboard and its built-in site viewer send every chain read through an [anon-rpc](https://ethereum.github.io/anon-rpc/) network (Nym by default). The RPC provider sees a mixnet exit, not who is looking at which project or site. `navik --anon` does the same for the CLI.
 - **Every name has a public link.** `navik.eth.limo`, `portfolio.navik.eth.limo` and `3.portfolio.navik.eth.limo` open in any browser with no IPFS and no host of ours: eth.limo reads the site from Ethereum. See [eth.limo links](#ethlimo-links).
 - **Anyone can check that a site matches its source.** `navik verify <name> --against <build>` and `scripts/reproduce.sh` rebuild a site from its repo and compare it byte for byte with what the name serves.
 - **Real apps, one command, CI included.** With a `navik.json`, `navik deploy` builds a Vite app (React, viem, …), packs its `dist/` into one document and smoke-tests it in a sandboxed browser before spending gas. A GitHub Action previews every merge with a publish-only key and promotes after approval. See [Deploy a Vite app](#deploy-a-vite-app-and-from-ci).
@@ -146,7 +146,28 @@ All numbers were measured from headless Chromium. The Tor demo gateway could not
 - release chunks and release listings are read in parallel;
 - compression (below) matters: the dashboard is 6 chunks instead of 14.
 
-The CLI is not covered: anon-rpc has no published Node harness yet. Point `--rpc` at your own node if you need private CLI reads.
+### In the CLI
+
+`navik --anon <command>` sends every RPC request through Nym, and `--anon-network nox` (or `NAVIK_ANON=nox`) picks another network. It needs Playwright, like `--smoke`.
+
+```
+$ navik --anon info
+anon-rpc     Nym → ethereum-rpc.publicnode.com
+anon-rpc     connected to Nym
+root         navik.eth  owner 0xF606…64C2
+…
+anon-rpc     6 calls through Nym
+```
+
+Anon-rpc has no usable Node harness yet: its Node prototype runs workers without WebAssembly, WebSocket or Worker, which Nym and Nox need. So the CLI runs the official browser harness in headless Chromium (`cli/src/anon.ts`), and viem's `http()` transport forwards to it. The dashboard's guarantees carry over:
+
+- **The same pinned workers.** `@navik/sdk` holds the hashes for both, and the harness checks `keccak256(bundle)` before running anything. No plain RPC call is made to bootstrap.
+- **Keys stay in the CLI's process.** Transactions are signed in Node, and the browser only ever receives a URL and a body. The signed transaction goes out through the worker too, along with the gas, nonce and receipt reads around it.
+- **It fails closed.** If the network does not connect within 90 s, the command fails. Nothing falls back to a direct connection, and `--anon` against a local RPC is refused, because no exit can reach it. `--anon-network passthrough` is the local test path, and it says it is not anonymous.
+- **Arkiv goes through anon-rpc too**, over Nox, as in the dashboard.
+- **Each run starts fresh:** a new browser, new worker state and a new `isolationKey`. Worker code is cached by hash in `~/.cache/navik/anon-rpc`, so the CDN only sees your first run.
+
+Over the live networks, a run of 6 reads took about 20 s with Nym and 2 reads about 6 s with Nox, including the connection. Deploying works but is slow: every chunk crosses the mixnet at 15–20 KB/s. Swarm traffic (`--swarm`, `reproduce`) is not covered, and the CLI prints a warning when it happens.
 
 ## eth.limo links
 
@@ -271,7 +292,7 @@ More detail in [`arkiv/`](arkiv/): [schema](arkiv/schema.md), [how we use Arkiv]
 | Navik (the team) | Nothing: there is no server | — |
 | Sites you open in the viewer | Nothing about the dashboard: opaque origin, no wallet | — |
 
-The CLI talks only to the RPC you pass, Arkiv's RPC (`ARKIV_RPC`) and, for `--swarm` and `reproduce`, the Swarm node or gateway (`SWARM_API`). It has no anon-rpc support yet (see [Private reads](#private-reads-anon-rpc)).
+The CLI talks only to the RPC you pass, Arkiv's RPC (`ARKIV_RPC`) and, for `--swarm` and `reproduce`, the Swarm node or gateway (`SWARM_API`). By default those connections are direct. With [`--anon`](#in-the-cli), the RPC and Arkiv traffic goes through anon-rpc, and Swarm stays direct.
 
 ### Security
 
@@ -328,7 +349,7 @@ node src/cli.ts open 2.portfolio.navik.eth
 node src/cli.ts provenance portfolio                         # source and reproductions, from Arkiv
 (cd ../examples/viem-vite && node ../../cli/src/cli.ts deploy --smoke)   # build, pack and ship from navik.json
 
-# full CLI flow (claim → deploy → grants → rollback → multi-chunk → revoke → isolation → eth.limo replica → custom domains → demote →
+# full CLI flow (claim → deploy → grants → rollback → multi-chunk → revoke → isolation → private reads → eth.limo replica → custom domains → demote →
 # the Vite example from navik.json, smoke-tested → unchanged re-deploy → code splitting rejected);
 # with ARKIV_PRIVATE_KEY set (tGLM on Rabdi) also provenance → Swarm (local stand-in) → reproduce → attest
 pnpm run e2e
@@ -408,6 +429,6 @@ Trade-offs:
 - **One document per site:** up to 64 chunks (1,572,800 bytes). Build directories are packed into it. Vite apps work with code splitting turned off; Next.js (its runtime loads chunks and RSC payloads by URL) and multi-page sites (only `index.html` is served) are not supported yet.
 - **Viewer sandbox:** sites opened in the dashboard run without wallet access. Sites that need a wallet render in ERC-8244 browsers or through `navik open`.
 - **Read integrity:** reads are anonymized but not proven. A lying RPC could serve a false release consistently with its manifest. A light client or `eth_getProof` checks would remove that trust.
-- **CLI reads are not anonymized** (no Node anon-rpc harness yet).
+- **CLI anonymity is opt-in** (`--anon`), because it needs a headless browser.
 - **Provenance is on a testnet.** Arkiv's Rabdi is a testnet, and records expire 180 days after their last extension unless someone extends them.
 - **Dashboard wallets:** browser-injected wallets only (EIP-6963), no WalletConnect, so there's no relay server.
