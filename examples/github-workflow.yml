@@ -1,0 +1,57 @@
+# .github/workflows/navik.yml in a site's repo, with navik.json at its root (see examples/viem-vite).
+#
+# Pull requests: build, pack, smoke-test and plan the release; nothing is sent.
+# main:          publish a release with a key that may only publish (preview.<project>.navik.eth follows it).
+#                Re-runs and commits that don't change the site publish nothing.
+# production:    after approval, promote that exact release with a key that may only promote.
+#
+# One-time setup, as the project owner:
+#   navik grant <project> <publish key address> --permission publish   → secret NAVIK_PUBLISH_KEY
+#   navik grant <project> <promote key address> --permission promote   → secret NAVIK_PROMOTE_KEY
+#   a "production" environment with required reviewers, and an RPC_URL secret
+# A leaked CI key can ship releases under new names, but cannot change what the project serves.
+name: Navik
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.navik.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - id: navik
+        uses: <org>/navik@main
+        with:
+          rpc-url: ${{ secrets.RPC_URL }}
+          private-key: ${{ github.event_name == 'push' && secrets.NAVIK_PUBLISH_KEY || '' }}
+          dry-run: ${{ github.event_name == 'pull_request' }}
+          max-gas-price: 3
+          # record the commit and build command on Arkiv, so anyone can `navik reproduce` it
+          # (the publish key needs tGLM on Arkiv; set ARKIV_ACCESS_KEY in env to avoid rate limits)
+          # provenance: ${{ github.event_name == 'push' }}
+
+  production:
+    needs: release
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: <org>/navik@main
+        with:
+          rpc-url: ${{ secrets.RPC_URL }}
+          private-key: ${{ secrets.NAVIK_PROMOTE_KEY }}
+          promote-version: ${{ needs.release.outputs.version }}

@@ -1,0 +1,128 @@
+name: Navik deploy
+description: Build a site from its navik.json and publish it as a permanent onchain release under navik.eth
+branding:
+  icon: upload-cloud
+  color: blue
+
+inputs:
+  working-directory:
+    description: Directory with navik.json (or below it)
+    default: .
+  project:
+    description: Project under navik.eth (default "project" in navik.json)
+    default: ''
+  rpc-url:
+    description: Ethereum JSON-RPC endpoint
+    required: true
+  private-key:
+    description: Key allowed to publish (`navik grant <project> <address> --permission publish`); not needed for dry-run
+    default: ''
+  promote:
+    description: Also make the release production (the key needs the promote permission)
+    default: 'false'
+  promote-version:
+    description: Only promote this existing release (e.g. 3) instead of building and publishing
+    default: ''
+  dry-run:
+    description: Build, pack, smoke-test and plan, but send nothing
+    default: 'false'
+  smoke:
+    description: Load the packed site in headless Chromium, sandboxed like the viewer, and stop if it breaks
+    default: 'true'
+  skip-build:
+    description: Ship the existing output without running navik.json's "build"
+    default: 'false'
+  max-gas-price:
+    description: Send nothing if gas costs more than this many gwei
+    default: ''
+  provenance:
+    description: Record the commit and build command on Arkiv (needs arkiv-private-key, or private-key with tGLM)
+    default: 'false'
+  swarm:
+    description: With provenance, also put the source on Swarm (needs SWARM_API and SWARM_BATCH in env)
+    default: 'false'
+  arkiv-private-key:
+    description: Key that writes provenance to Arkiv (default private-key; provenance is only trusted from the publisher)
+    default: ''
+
+outputs:
+  release:
+    description: Release name, e.g. 4.portfolio.navik.eth
+    value: ${{ steps.navik.outputs.release }}
+  version:
+    description: Release number
+    value: ${{ steps.navik.outputs.version }}
+  address:
+    description: Release contract (ERC-8244 html())
+    value: ${{ steps.navik.outputs.address }}
+  content-hash:
+    description: keccak256 of the stored document
+    value: ${{ steps.navik.outputs.content-hash }}
+  published:
+    description: Whether a new release was published
+    value: ${{ steps.navik.outputs.published }}
+  unchanged:
+    description: The bytes equal the latest release, so nothing was published
+    value: ${{ steps.navik.outputs.unchanged }}
+  promoted:
+    description: Whether production was changed
+    value: ${{ steps.navik.outputs.promoted }}
+  preview:
+    description: preview.<project>.navik.eth, which follows the newest release
+    value: ${{ steps.navik.outputs.preview }}
+  provenance:
+    description: Arkiv entity of the provenance record
+    value: ${{ steps.navik.outputs.provenance }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install the Navik CLI
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: |
+        npx --yes pnpm@12.5.1 install --frozen-lockfile --filter '@navik/cli...' >/dev/null
+        node cli/bundle.ts
+
+    - name: Install Chromium for the smoke test
+      if: inputs.smoke == 'true' && inputs.promote-version == ''
+      shell: bash
+      working-directory: ${{ github.action_path }}/cli
+      run: npx --no-install playwright install --with-deps chromium
+
+    - name: Deploy
+      id: navik
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        NAVIK: ${{ github.action_path }}/cli/dist/navik.js
+        RPC_URL: ${{ inputs.rpc-url }}
+        PRIVATE_KEY: ${{ inputs.private-key }}
+        ARKIV_PRIVATE_KEY: ${{ inputs.arkiv-private-key || inputs.private-key }}
+        PROJECT: ${{ inputs.project }}
+        PROMOTE: ${{ inputs.promote }}
+        PROMOTE_VERSION: ${{ inputs.promote-version }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        SMOKE: ${{ inputs.smoke }}
+        SKIP_BUILD: ${{ inputs.skip-build }}
+        MAX_GAS_PRICE: ${{ inputs.max-gas-price }}
+        PROVENANCE: ${{ inputs.provenance }}
+        SWARM: ${{ inputs.swarm }}
+      run: |
+        [[ -n "$PRIVATE_KEY" ]] || unset PRIVATE_KEY
+        [[ -n "$ARKIV_PRIVATE_KEY" ]] || unset ARKIV_PRIVATE_KEY
+        if [[ -n "$PROMOTE_VERSION" ]]; then
+          project=${PROJECT:-$(node "$NAVIK" config project)}
+          node "$NAVIK" promote "$project" "v${PROMOTE_VERSION#v}"
+          exit
+        fi
+        args=()
+        [[ -n "$PROJECT" ]] && args+=("$PROJECT")
+        [[ "$PROMOTE" == true ]] && args+=(--promote)
+        [[ "$DRY_RUN" == true ]] && args+=(--dry-run)
+        [[ "$SMOKE" == true ]] && args+=(--smoke)
+        [[ "$SKIP_BUILD" == true ]] && args+=(--skip-build)
+        [[ -n "$MAX_GAS_PRICE" ]] && args+=(--max-gas-price "$MAX_GAS_PRICE")
+        [[ "$PROVENANCE" == true ]] && args+=(--provenance --notes "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
+        [[ "$SWARM" == true ]] && args+=(--swarm)
+        node "$NAVIK" deploy "${args[@]}"
