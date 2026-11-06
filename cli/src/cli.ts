@@ -14,8 +14,12 @@ import { buildSite, describePack, findConfig, readSite, recordedBuild, shouldCom
 import { describeSmoke, smoke } from './smoke.ts'
 import { extractTar, gitArchive, gitCheckout, type GitSource, gitSource, runBuild, tarCommit } from './source.ts'
 
+/** Set by bundle.ts; running from source reports "dev". */
+declare const __NAVIK_CLI_VERSION__: string | undefined
+
 const program = new Command()
   .name('navik')
+  .version(typeof __NAVIK_CLI_VERSION__ === 'undefined' ? 'dev' : __NAVIK_CLI_VERSION__)
   .description('Deploy fully onchain websites to <project>.navik.eth (ENSv2 + ERC-8244)')
   .option('--rpc <url>', 'JSON-RPC endpoint (env RPC_URL, default http://127.0.0.1:8545)')
   .option('--deployment <file>', 'Navik deployment JSON (env NAVIK_DEPLOYMENT, default contracts/deployments/<chainId>.json)')

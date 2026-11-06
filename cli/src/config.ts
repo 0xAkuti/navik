@@ -16,6 +16,9 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { mainnet } from 'viem/chains'
 
 const DEPLOYMENTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../contracts/deployments')
+/** Set by bundle.ts: the public deployments, for the CLI installed outside this repo. */
+declare const __NAVIK_DEPLOYMENTS__: Record<string, NavikDeployment> | undefined
+const EMBEDDED = typeof __NAVIK_DEPLOYMENTS__ === 'undefined' ? {} : __NAVIK_DEPLOYMENTS__
 
 export type GlobalOptions = { rpc?: string; deployment?: string }
 
@@ -24,9 +27,7 @@ export async function loadCtx(opts: GlobalOptions): Promise<Ctx> {
   const probe = createPublicClient({ transport: http(rpc) })
   const chainId = await probe.getChainId()
 
-  const path = opts.deployment ?? process.env.NAVIK_DEPLOYMENT ?? resolve(DEPLOYMENTS_DIR, `${chainId}.json`)
-  if (!existsSync(path)) throw new Error(`no Navik deployment for chain ${chainId} (looked for ${path})`)
-  const deployment = JSON.parse(readFileSync(path, 'utf8')) as NavikDeployment
+  const deployment = loadDeployment(chainId, opts.deployment ?? process.env.NAVIK_DEPLOYMENT)
 
   // a local fork (31337) runs mainnet ENSv2 state under another chain id
   const chain: Chain = chainId === mainnet.id ? mainnet : { ...mainnet, id: chainId, name: 'Mainnet fork' }
@@ -38,6 +39,14 @@ export async function loadCtx(opts: GlobalOptions): Promise<Ctx> {
   const account = privateKeyToAccount(key)
   const walletClient = createWalletClient({ account, chain, transport })
   return { deployment, publicClient, account: account.address, send: (tx) => walletClient.sendTransaction(tx) }
+}
+
+/** An explicit file, else this repo's contracts/deployments, else the ones embedded in the bundle. */
+function loadDeployment(chainId: number, file?: string): NavikDeployment {
+  const path = file ?? resolve(DEPLOYMENTS_DIR, `${chainId}.json`)
+  if (existsSync(path)) return JSON.parse(readFileSync(path, 'utf8')) as NavikDeployment
+  if (!file && EMBEDDED[chainId]) return EMBEDDED[chainId]
+  throw new Error(`no Navik deployment for chain ${chainId} (looked for ${path}; pass --deployment <file>)`)
 }
 
 /**
