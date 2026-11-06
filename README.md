@@ -73,7 +73,7 @@ PRIVATE_KEY=0x… ./scripts/deploy-app.sh   # build for the connected chain, dep
 
 ## Deploy a Vite app (and from CI)
 
-A release stores one HTML document, so a site with a build directory gets packed into one at deploy time. Add a `navik.json` next to its `package.json` ([example](examples/viem-vite), React + viem):
+A release stores one HTML document, so a site with a build directory gets packed into one at deploy time. Add a `navik.json` next to its `package.json` ([example](examples/viem-vite), React + viem + self-hosted Inter):
 
 ```json
 { "project": "portfolio", "build": "pnpm install --frozen-lockfile && pnpm build", "output": "dist" }
@@ -82,9 +82,10 @@ A release stores one HTML document, so a site with a build directory gets packed
 ```text
 $ navik deploy --smoke --promote
 build        pnpm install --frozen-lockfile && pnpm build
-packed       4 file(s) inlined into one document
+packed       8 file(s) inlined into one document
 release      1.portfolio.navik.eth
-compressed   589362 → 259961 bytes (24 → 11 chunks)
+compressed   736490 → 406562 bytes (30 → 21 chunks)
+segments     5 asset(s) in chunks of their own, reused while unchanged
 smoke        ✓ rendered in a sandboxed frame ("ENS lookup · a Navik example")
 uploaded 2 chunk(s) …
 promoted     portfolio.navik.eth → 1.portfolio.navik.eth
@@ -93,7 +94,16 @@ promoted     portfolio.navik.eth → 1.portfolio.navik.eth
 - **Packing** (`packSite` in the SDK) inlines scripts and stylesheets, and turns every other file the page references into a data URI: images, fonts, icons and JSON, whether referenced from HTML attributes, CSS `url()` or string literals in JS. It only rewrites paths that name a file in the build, and the same build always packs to the same bytes, so `navik verify --against dist/` and `navik reproduce` still compare byte for byte.
 - **Code splitting has to be off:** chunks load each other by URL, and an onchain site has none. Packing refuses such a build, names the chunk and says how to fix it. With Vite 8, that's `build.rolldownOptions.output.codeSplitting = false` (viem's lazy CCIP-Read module is one such chunk). Only `index.html` is served; other pages and unreferenced files are listed as left out.
 - **`--smoke`** loads the stored bytes (including the gzip loader) in headless Chromium, in a sandboxed frame with an opaque origin like the viewer's. It fails on uncaught errors, on requests for files that are not in the document, and on a blank page. It needs Playwright (`npx playwright install chromium`).
-- **Compression** is on for packed builds when it makes them smaller. A bundle with React and viem is ~590 KB, stored as 11 chunks (~58M gas on mainnet; a release that reuses stored chunks costs far less).
+- **Compression** is on for packed builds when it makes them smaller.
+- **Large assets get chunks of their own.** Fonts, images and other files of 4 KB or more are stored in segments that start a new chunk and depend only on the file's bytes. The document, gzipped, comes last, with placeholders where those files were. So an unchanged font is never uploaded again, whatever else changes, and the same file is shared by every Navik site that uses it (chunks are content-addressed). The loader and `navik verify` rebuild the packed document exactly, so verification and reproduction are unchanged. Measured with the example (React, viem, two Inter weights as woff2 + woff, ~740 KB packed) on a mainnet fork:
+
+  | Release | Chunks reused | Gas |
+  |---|---|---|
+  | First deploy | 0 of 21 | 90.4M |
+  | One word changed in the app | 20 of 21 | 3.5M |
+  | New viem module imported + a CSS change | 10 of 21 (all fonts and images) | 57.8M |
+
+  With plain gzip of the whole document, the last case reused nothing. Within the document, chunks before the first changed byte are reused; the bundler puts app code after library code, which is why a small app change is cheap. A change in library code still re-uploads the document's chunks; splitting the libraries into a segment of their own is future work.
 - **CI-friendly:** `--json` prints the result on stdout, and in GitHub Actions the CLI writes step outputs and a job summary. If the bytes equal the latest release, nothing is published, so re-runs and commits that don't change the site cost nothing. `--max-gas-price <gwei>` stops before sending anything when gas is expensive.
 - **`navik build`** does the same without a chain: build, pack, report the size, `--smoke`, `--out site.html` (e.g. to drop on the viewer's "Compare with a local build").
 
@@ -343,7 +353,7 @@ Mainnet caps a transaction at 2^24 gas (EIP-7825), so the CLI uploads at most 2 
 
 ### Compression
 
-`navik deploy --compress` (the default for packed build directories, when it saves bytes), or the "Compress" checkbox in the dashboard, stores the site gzip-wrapped. The stored document is a small loader page: the original HTML gzipped and base64-encoded, plus a script that decompresses it in the browser (`DecompressionStream`) and swaps it in. The loader keeps `window` intact, so wallet discovery (EIP-6963) and other listeners keep working; it re-runs the page's scripts in order and fires `DOMContentLoaded` and `load`.
+`navik deploy --compress` (the default for packed build directories, when it saves bytes; they are stored [segmented](#deploy-a-vite-app-and-from-ci)), or the "Compress" checkbox in the dashboard, stores the site gzip-wrapped. The stored document is a small loader page: the original HTML gzipped and base64-encoded, plus a script that decompresses it in the browser (`DecompressionStream`) and swaps it in. The loader keeps `window` intact, so wallet discovery (EIP-6963) and other listeners keep working; it re-runs the page's scripts in order and fires `DOMContentLoaded` and `load`.
 
 | Site | Raw | Compressed |
 |---|---|---|
