@@ -19,7 +19,7 @@ promoted     portfolio.navik.eth → 3.portfolio.navik.eth
 - **Every name has a public link.** `navik.eth.limo`, `portfolio.navik.eth.limo` and `3.portfolio.navik.eth.limo` open in any browser with no IPFS and no host of ours: eth.limo reads the site from Ethereum. See [eth.limo links](#ethlimo-links).
 - **Anyone can check that a site matches its source.** `navik verify <name> --against <build>` and `scripts/reproduce.sh` rebuild a site from its repo and compare it byte for byte with what the name serves.
 - **Real apps, one command, CI included.** With a `navik.json`, `navik deploy` builds a Vite app (React, viem, …), packs its `dist/` into one document and smoke-tests it in a sandboxed browser before spending gas. A GitHub Action previews every merge with a publish-only key and promotes after approval. See [Deploy a Vite app](#deploy-a-vite-app-and-from-ci).
-- **Provenance on Arkiv, source on Swarm.** `navik deploy --build <cmd>` records on [Arkiv](https://arkiv.network) which commit and command built a release, and puts the source on Swarm. Anyone who rebuilds it can attest the result, and the viewer shows "reproduced ×N" for any ERC-8244 site. See [Provenance](#provenance-on-arkiv-source-on-swarm).
+- **Provenance on Arkiv, source on Swarm.** `navik deploy` records on [Arkiv](https://arkiv.network) which commit and command built a release, and can put the source on Swarm. Anyone who rebuilds it can attest the result, and the viewer shows "reproduced ×N" for any ERC-8244 site. See [Provenance](#provenance-on-arkiv-source-on-swarm).
 
 ## How it works
 
@@ -225,12 +225,13 @@ Ethereum proves which bytes a name serves, but not which code they came from. St
 - **Records never change and anyone can keep them.** Both kinds are created `readonly`, with `permissionlessExtension`, for 180 days (Arkiv's cap is ~182.5). `navik keep-alive` or the viewer's "Keep alive" extends them, from any wallet.
 - **The source is checked, not trusted.** `navik reproduce` downloads the tar from Swarm and checks three things before building: its keccak256 equals `sourceHash`, the commit embedded in the tar equals `commit`, and after the build, the file is byte-identical to what the name serves.
 - **It is optional.** Nothing about serving or verifying a site needs Arkiv or Swarm. If Arkiv is unreachable, the viewer says so and still renders the site, verified from Ethereum.
+- **It is on by default from `navik.json`.** `navik deploy` and the GitHub Action record provenance when the tree is clean, the repo is public and the deploy key has tGLM: Arkiv is public, and only the publisher's record counts. Otherwise they print why and deploy anyway. `--provenance` (`provenance: true` in the Action) fails instead, and `--no-provenance` (`provenance: false`) turns it off. `--anon` skips it unless asked, because checking the repo would contact it directly. The dashboard records nothing: it only sees an HTML file.
 
 ```bash
 export ARKIV_PRIVATE_KEY=0x…                 # tGLM from https://hub.arkiv.network/faucet; defaults to PRIVATE_KEY
 export SWARM_API=http://127.0.0.1:1633 SWARM_BATCH=<postage batch>   # bee or Freedom's antd; only for --swarm
 
-node cli/src/cli.ts deploy --provenance --swarm --notes "v3"   # build from navik.json; records its "build" and dist/
+node cli/src/cli.ts deploy --swarm --notes "v3"   # build from navik.json; records its "build" and dist/
 node cli/src/cli.ts deploy portfolio dist/index.html --build "npm ci && npm run build" --swarm   # a file built yourself
 node cli/src/cli.ts record 2.portfolio dist/index.html --build "npm ci && npm run build"   # an existing release
 node cli/src/cli.ts provenance portfolio      # source, publisher check, reproductions (no key needed)

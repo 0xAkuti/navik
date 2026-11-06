@@ -13,7 +13,7 @@ Both are created with the same options:
 
 ## `navik.provenance`: which source built a release
 
-Written by `navik deploy … --build <cmd>` (or `navik record`), signed by the deploy key.
+Written by `navik deploy` (by default from `navik.json`, with `--build <cmd>` for a path) or `navik record`, signed by the deploy key.
 
 | Column | Type | Indexed | Meaning |
 |---|---|---|---|
