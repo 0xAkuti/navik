@@ -88,6 +88,7 @@ page.on('request', (r) => {
   if (!/^(file:|data:|blob:|about:)/.test(url) && !url.startsWith(RPC) && !url.startsWith(WORKER_BUNDLE)) external.push(url)
 })
 page.on('pageerror', (e) => console.error('page error:', e.message))
+await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
 await page.addInitScript(injectWallet, { rpc: RPC, account: ALICE })
 
 try {
@@ -129,6 +130,22 @@ try {
     await releaseRow(page, 1).getByRole('button', { name: 'Roll back' }).click()
     await production(page).filter({ hasText: `1.${project}.navik.eth` }).waitFor()
     await page.screenshot({ path: `${SHOTS}-2-project.png`, fullPage: true })
+  })
+
+  await step('addresses link to Blockscout; addresses and hashes copy', async () => {
+    const owner = page.locator('.page-head a.ext')
+    assert.equal(await owner.getAttribute('href'), `https://eth.blockscout.com/address/${ALICE}`)
+    assert.equal(await owner.getAttribute('target'), '_blank')
+    const meta = releaseRow(page, 1).locator('.muted.small')
+    const deployment = (await meta.locator('a.ext').getAttribute('href'))!.split('/').pop()!
+    assert.match(deployment, /^0x[0-9a-fA-F]{40}$/)
+    await meta.locator('.copy-btn').first().click()
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), deployment)
+    await meta.locator('.copy-btn').last().click()
+    assert.match(await page.evaluate(() => navigator.clipboard.readText()), /^0x[0-9a-f]{64}$/)
+    await meta.locator('.copy-btn').last().and(page.locator('.copied')).waitFor()
+    // identicons are the ENS app's etherloom weave
+    assert.match((await page.locator('.page-head img.avatar').getAttribute('src'))!, /^data:image\/svg\+xml/)
   })
 
   await step('view v2: fetched from Ethereum, hash-checked, rendered sandboxed', async () => {

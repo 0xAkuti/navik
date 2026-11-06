@@ -1,6 +1,6 @@
 import { generatePatternDataURI } from '@ensdomains/etherloom'
 import type { ComponentChildren } from 'preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 
 export function shortAddr(a: string) {
   return `${a.slice(0, 6)}…${a.slice(-4)}`
@@ -35,6 +35,7 @@ const ICONS = {
   key: 'M14 10a4 4 0 1 0-3.5 4L8 16.5V19h2.5v-2h2l1.5-1.5V14a4 4 0 0 0 0-4zm1-1h.01',
   lock: 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3',
   chevron: 'm9 6 6 6-6 6',
+  copy: 'M9 8h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1zM5 16V5a1 1 0 0 1 1-1h10',
 } as const
 
 export function Icon(props: { name: keyof typeof ICONS; size?: number }) {
@@ -72,6 +73,73 @@ export function Avatar(props: { seed: string; size?: number }) {
   }
   const s = props.size ?? 20
   return <img class="avatar" src={src} alt="" width={s} height={s} draggable={false} />
+}
+
+/** Block explorer per chain; the dev fork is a mainnet fork, so it shares mainnet's. */
+const BLOCKSCOUT: Record<number, string> = { 1: 'https://eth.blockscout.com', 31337: 'https://eth.blockscout.com' }
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const t = Object.assign(document.createElement('textarea'), { value: text })
+    document.body.append(t)
+    t.select()
+    document.execCommand('copy')
+    t.remove()
+  }
+}
+
+export function CopyButton(props: { value: string }) {
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (!copied) return
+    const t = setTimeout(() => setCopied(false), 1200)
+    return () => clearTimeout(t)
+  }, [copied])
+  return (
+    <button
+      type="button"
+      class={`copy-btn ${copied ? 'copied' : ''}`}
+      title={copied ? 'Copied' : `Copy ${props.value}`}
+      aria-label={copied ? 'Copied' : 'Copy'}
+      onClick={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        copyText(props.value).then(() => setCopied(true), () => undefined)
+      }}
+    >
+      <Icon name={copied ? 'check' : 'copy'} size={13} />
+    </button>
+  )
+}
+
+/** An address: shortened unless `full`, linked to Blockscout unless `link` is false, with a copy button. */
+export function Addr(props: { address: string; chainId?: number; full?: boolean; link?: boolean }) {
+  const base = props.link === false ? undefined : BLOCKSCOUT[props.chainId ?? 1]
+  const text = <Mono title={props.address}>{props.full ? props.address : shortAddr(props.address)}</Mono>
+  return (
+    <span class="hash">
+      {base ? (
+        <a class="ext" href={`${base}/address/${props.address}`} target="_blank" rel="noopener noreferrer" title={`${props.address} on Blockscout`}>
+          {text}
+        </a>
+      ) : (
+        text
+      )}
+      <CopyButton value={props.address} />
+    </span>
+  )
+}
+
+/** A hash shown as its first `chars` characters, with a copy button for the whole value. */
+export function Hash(props: { value: string; chars?: number }) {
+  return (
+    <span class="hash">
+      <Mono title={props.value}>{props.value.slice(0, props.chars ?? 12)}…</Mono>
+      <CopyButton value={props.value} />
+    </span>
+  )
 }
 
 export function Spinner() {

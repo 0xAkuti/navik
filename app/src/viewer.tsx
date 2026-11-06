@@ -3,7 +3,7 @@ import type { ComponentChildren } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 
 import { networkById, useReads } from './reads.ts'
-import { Badge, Icon, kb, Mono, shortAddr, Spinner } from './ui.tsx'
+import { Addr, Badge, Hash, Icon, kb, Mono, Spinner } from './ui.tsx'
 
 type Loaded = { v: navik.Verification; ms: number; calls: number; bytes: number }
 
@@ -118,7 +118,7 @@ export function Viewer(props: { ctx: navik.Ctx; name: string }) {
             </div>
             <ul class="checks">
               <Check ok>
-                <Mono>{loaded.v.name}</Mono> resolves to <Mono title={loaded.v.deployment}>{shortAddr(loaded.v.deployment)}</Mono> via ENS
+                <Mono>{loaded.v.name}</Mono> resolves to <Addr address={loaded.v.deployment} chainId={ctx.deployment.chainId} /> via ENS
               </Check>
               {loaded.v.isNavikDeployment ? (
                 <Check ok>
@@ -144,7 +144,7 @@ export function Viewer(props: { ctx: navik.Ctx; name: string }) {
               <dd>{kb(loaded.v.html.length)}</dd>
               <dt>keccak256</dt>
               <dd>
-                <Mono title={loaded.v.computedHash}>{loaded.v.computedHash.slice(0, 14)}…</Mono>
+                <Hash value={loaded.v.computedHash} chars={14} />
               </dd>
               <dt>Read</dt>
               <dd>
@@ -191,7 +191,7 @@ function CompareBuild(props: { v: navik.Verification }) {
           </p>
         ) : (
           <p class="error small">
-            <Icon name="x" size={14} /> {result.file} differs (keccak256 <Mono>{result.cmp.hash.slice(0, 14)}…</Mono>)
+            <Icon name="x" size={14} /> {result.file} differs (keccak256 <Hash value={result.cmp.hash} chars={14} />)
           </p>
         ))}
     </div>

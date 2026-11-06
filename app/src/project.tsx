@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'preact/hooks'
 import { type Address, getAddress, isAddress } from 'viem'
 
 import type { Run } from './app.tsx'
-import { Avatar, Badge, Icon, kb, Modal, Mono, shortAddr, Spinner } from './ui.tsx'
+import { Addr, Avatar, Badge, Hash, Icon, kb, Modal, Mono, Spinner } from './ui.tsx'
 
 type Data = {
   owner: Address
@@ -79,7 +79,7 @@ export function ProjectView(props: { ctx: navik.Ctx; project: string; tab?: stri
               {role && <Badge tone={data?.perms.owner ? 'blue' : 'muted'}>{role}</Badge>}
               {data && (
                 <span>
-                  owned by <Mono title={data.owner}>{shortAddr(data.owner)}</Mono>
+                  owned by <Addr address={data.owner} chainId={ctx.deployment.chainId} />
                 </span>
               )}
             </div>
@@ -166,7 +166,7 @@ function Production(props: { ctx: navik.Ctx; project: string; data: Data; busy: 
             <dt>Content</dt>
             <dd class="muted">
               {kb(live.size)} · {live.chunks} chunk{live.chunks === 1 ? '' : 's'} ·{' '}
-              <Mono title={live.contentHash}>{live.contentHash.slice(0, 12)}…</Mono>
+              <Hash value={live.contentHash} />
             </dd>
           </>
         )}
@@ -230,8 +230,8 @@ function Releases(props: { ctx: navik.Ctx; project: string; data: Data; busy: bo
                     {isPreview && <Badge tone="blue">Preview</Badge>}
                   </div>
                   <div class="muted small">
-                    <Mono title={r.deployment}>{shortAddr(r.deployment)}</Mono> · {kb(r.size)} · {r.chunks} chunk
-                    {r.chunks === 1 ? '' : 's'} · <span title={r.contentHash}>{r.contentHash.slice(0, 10)}…</span>
+                    <Addr address={r.deployment} chainId={ctx.deployment.chainId} /> · {kb(r.size)} · {r.chunks} chunk
+                    {r.chunks === 1 ? '' : 's'} · <Hash value={r.contentHash} chars={10} />
                   </div>
                 </div>
                 <div class="release-actions">
@@ -370,7 +370,7 @@ function DeployModal(props: { ctx: navik.Ctx; project: string; busy: boolean; ca
           </dd>
           <dt>Address</dt>
           <dd>
-            <Mono>{plan.predicted}</Mono> <span class="muted small">known before upload</span>
+            <Addr address={plan.predicted} full link={false} /> <span class="muted small">known before upload</span>
           </dd>
         </dl>
       )}
@@ -443,7 +443,7 @@ function AccessCard(props: { ctx: navik.Ctx; project: string; data: Data; busy: 
             keys.map((k) => (
               <div key={k.account} class="key-row">
                 <Avatar seed={k.account.toLowerCase()} size={24} />
-                <Mono>{k.account}</Mono>
+                <Addr address={k.account} chainId={ctx.deployment.chainId} full />
                 {k.publish && <Badge tone="blue">deploy</Badge>}
                 {k.promote && <Badge tone="blue">promote</Badge>}
                 <span class="spacer" />

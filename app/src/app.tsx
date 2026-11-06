@@ -8,7 +8,7 @@ import { PrivacyDrawer, PrivacyPill } from './privacy.tsx'
 import { ProjectView } from './project.tsx'
 import { loggedWallet, useReads } from './reads.ts'
 import { store } from './store.ts'
-import { Avatar, Badge, Icon, Logo, Modal, Mono, shortAddr, Spinner } from './ui.tsx'
+import { Addr, Avatar, Badge, CopyButton, Icon, Logo, Modal, Mono, shortAddr, Spinner } from './ui.tsx'
 import { Viewer } from './viewer.tsx'
 import {
   defaultChainId,
@@ -209,7 +209,8 @@ function AccountChip(props: { ctx?: navik.Ctx; account: Address }) {
   return (
     <span class="chip" title={props.account}>
       <Avatar seed={props.account.toLowerCase()} size={20} />
-      {name ?? <Mono>{shortAddr(props.account)}</Mono>}
+      {name ?? <Addr address={props.account} chainId={props.ctx?.deployment.chainId} />}
+      {name && <CopyButton value={props.account} />}
     </span>
   )
 }
@@ -529,7 +530,7 @@ function NewProject(props: { ctx: navik.Ctx; account: Address; run: Run; busy: b
             </span>
           ) : (
             <span class="error">
-              Taken by <Mono>{shortAddr(owner)}</Mono>
+              Taken by <Addr address={owner} chainId={ctx.deployment.chainId} />
               {owner.toLowerCase() === account.toLowerCase() && (
                 <>
                   {' '}
