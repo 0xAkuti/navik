@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'preact/hooks'
 import { type Address, getAddress, isAddress } from 'viem'
 
 import type { Run } from './app.tsx'
+import { DomainsCard } from './domains.tsx'
 import { Addr, Avatar, Badge, Hash, Icon, kb, Modal, Mono, Spinner } from './ui.tsx'
 
 type Data = {
@@ -66,7 +67,7 @@ export function ProjectView(props: { ctx: navik.Ctx; project: string; tab?: stri
         : data.perms.publish
           ? 'Deploy key'
           : 'Read only'
-  const tab = props.tab === 'access' ? 'access' : 'releases'
+  const tab = props.tab === 'access' || props.tab === 'domains' ? props.tab : 'releases'
 
   return (
     <div class="page">
@@ -101,6 +102,9 @@ export function ProjectView(props: { ctx: navik.Ctx; project: string; tab?: stri
         <a class={tab === 'releases' ? 'active' : ''} href={`#/p/${project}`}>
           Releases
         </a>
+        <a class={tab === 'domains' ? 'active' : ''} href={`#/p/${project}/domains`}>
+          Domains
+        </a>
         <a class={tab === 'access' ? 'active' : ''} href={`#/p/${project}/access`}>
           Access
         </a>
@@ -110,6 +114,8 @@ export function ProjectView(props: { ctx: navik.Ctx; project: string; tab?: stri
         <div class="card production skeleton" />
       ) : tab === 'access' ? (
         <AccessCard ctx={ctx} project={project} data={data} busy={busy} act={act} />
+      ) : tab === 'domains' ? (
+        <DomainsCard ctx={ctx} project={project} projectOwner={data.owner} busy={busy} act={act} />
       ) : (
         <>
           <Production ctx={ctx} project={project} data={data} busy={busy} act={act} onDeploy={() => setDeploying(true)} />

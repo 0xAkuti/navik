@@ -327,3 +327,13 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .attests li { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .attests .icon { color: var(--ok); }
 .attests li.error .icon { color: var(--error); }
+
+/* custom domains */
+.domain-row .domain-steps { flex-basis: 100%; margin: 4px 0 0 34px; }
+.domain-steps { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
+.domain-steps li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.domain-steps li.done { color: var(--text); }
+.step-mark { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 999px; border: 1.5px solid var(--line-strong); flex: none; }
+.domain-steps li.done .step-mark { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
+.domain-check { margin-top: 12px; padding: 16px 18px; }
+.domain-check p { margin: 0 0 12px; }

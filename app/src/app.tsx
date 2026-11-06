@@ -23,7 +23,7 @@ import {
 
 export type Run = (label: string, fn: () => Promise<unknown>) => Promise<boolean>
 
-/** `#/`, `#/new`, `#/p/<project>[/access]`, `#/open/<name>` */
+/** `#/`, `#/new`, `#/p/<project>[/domains|/access]`, `#/open/<name>` */
 type Route = { page: 'home' | 'new' | 'project' | 'open'; arg: string; tab?: string }
 function parseRoute(): Route {
   const [page, arg = '', tab] = decodeURIComponent(location.hash.replace(/^#\/?/, '')).split('/')
