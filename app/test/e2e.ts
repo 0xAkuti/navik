@@ -4,6 +4,7 @@
 // With ARKIV_PRIVATE_KEY (tGLM on Arkiv's testnet), the wallet also signs on Arkiv with that key,
 // and the viewer's attestation and keep-alive are exercised against the real testnet.
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { arkivChain } from '@navik/sdk'
@@ -14,6 +15,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 const RPC = process.env.RPC_URL ?? 'http://127.0.0.1:8545'
 const ALICE = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8' // anvil #1
 const CI = '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC' // anvil #2
+const VITALIK = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045' // primary name vitalik.eth on mainnet, so on the fork
 // APP_FILE: e.g. the copy of the app fetched from Ethereum with `navik open navik.eth`
 const APP = pathToFileURL(process.env.APP_FILE ?? resolve(import.meta.dirname, '../dist/index.html')).href
 const SHOTS = process.env.SHOTS ?? '/tmp/navik-app'
@@ -111,6 +113,23 @@ async function rpc(method: string, params: unknown[] = []) {
   return json.result
 }
 
+async function waitForReceipt(hash: string) {
+  for (let i = 0; i < 50; i++) {
+    const receipt = await rpc('eth_getTransactionReceipt', [hash])
+    if (receipt) return receipt
+    await new Promise((r) => setTimeout(r, 200))
+  }
+}
+
+/** Sends a transaction from any account on the fork (anvil impersonation). */
+async function sendAs(from: string, to: string, data: Hex, what: string) {
+  await rpc('anvil_impersonateAccount', [from])
+  await rpc('anvil_setBalance', [from, '0xde0b6b3a7640000'])
+  const hash = await rpc('eth_sendTransaction', [{ from, to, data }])
+  await rpc('anvil_stopImpersonatingAccount', [from])
+  assert.equal((await waitForReceipt(hash))?.status, '0x1', what)
+}
+
 /** Registers `<label>.eth` for `owner` on the fork, as ENSv2's ETHRegistrar does after a purchase. */
 async function registerEth(label: string, owner: string) {
   const registrar = '0xD6D8369e55c94Ae8AFA714E6cF7AB5bE54D5CC81'
@@ -119,16 +138,7 @@ async function registerEth(label: string, owner: string) {
     abi: parseAbi(['function register(string,address,address,address,uint256,uint64)']),
     args: [label, owner as Hex, '0x0000000000000000000000000000000000000000', '0x000000000000000000000000000000000000dEaD', roles, BigInt(Math.floor(Date.now() / 1000) + 365 * 86400)],
   })
-  await rpc('anvil_impersonateAccount', [registrar])
-  await rpc('anvil_setBalance', [registrar, '0xde0b6b3a7640000'])
-  const hash = await rpc('eth_sendTransaction', [{ from: registrar, to: '0xf60aba43E1f7F3DAB1186Ff03B561401C9Df85E2', data }])
-  await rpc('anvil_stopImpersonatingAccount', [registrar])
-  let receipt
-  for (let i = 0; i < 50 && !receipt; i++) {
-    receipt = await rpc('eth_getTransactionReceipt', [hash])
-    if (!receipt) await new Promise((r) => setTimeout(r, 200))
-  }
-  assert.equal(receipt?.status, '0x1', `registering ${label}.eth`)
+  await sendAs(registrar, '0xf60aba43E1f7F3DAB1186Ff03B561401C9Df85E2', data, `registering ${label}.eth`)
 }
 
 const browser = await chromium.launch()
@@ -232,6 +242,28 @@ try {
     const row = page.locator('.key-row', { hasText: CI })
     await row.waitFor()
     await row.getByRole('button', { name: 'Revoke deploy' }).click()
+    await page.getByText('No keys granted.').waitFor()
+    await page.locator('.tabs').getByRole('link', { name: 'Releases' }).click()
+  })
+
+  await step('people show as their primary ENS name: a key, and the publisher of a release', async () => {
+    await page.locator('.tabs').getByRole('link', { name: 'Access' }).click()
+    await page.getByPlaceholder('0x… key address').fill(VITALIK)
+    await page.getByRole('button', { name: 'Grant' }).click()
+    await page.locator('.key-row', { hasText: 'vitalik.eth' }).waitFor()
+    // vitalik.eth publishes release 4 with the key (outside the app, as CI would)
+    const { factory } = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../contracts/deployments/31337.json'), 'utf8'))
+    const data = encodeFunctionData({
+      abi: parseAbi(['function publishContent(string label, bytes[] chunks)']),
+      args: [project, [`0x${site(4).toString('hex')}`]],
+    })
+    await sendAs(VITALIK, factory, data, 'publishing as vitalik.eth')
+    await page.goto(`${APP}#/open/4.${project}.navik.eth`)
+    await siteFrame(page).getByText('hello from v4').waitFor()
+    await page.locator('.source').getByText('No provenance from the publisher vitalik.eth').waitFor()
+    await shot(page, { path: `${SHOTS}-3b-publisher-name.png`, fullPage: true })
+    await page.goto(`${APP}#/p/${project}/access`)
+    await page.locator('.key-row', { hasText: 'vitalik.eth' }).getByRole('button', { name: 'Revoke deploy' }).click()
     await page.getByText('No keys granted.').waitFor()
     await page.locator('.tabs').getByRole('link', { name: 'Releases' }).click()
   })
