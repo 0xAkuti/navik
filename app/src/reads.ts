@@ -96,17 +96,37 @@ export const NETWORKS: AnonNetwork[] = [
 export type NetworkId = AnonNetwork['id'] | 'direct'
 export type ReadSettings = { network: NetworkId; rpc: string }
 
+/** Arkiv's testnet (Rabdi): release provenance and attestations are read from it. */
+export const ARKIV_CHAIN_ID = 7794095
+/**
+ * The public endpoint (rate limited). An access key would make the build depend on it, so it is
+ * left out; paste `<rpc>/<access key>` in the privacy panel to use one.
+ */
+const ARKIV_RPC = 'https://rpc.rabdi.db-chain.testnet.arkiv.network'
+
 /** Public RPCs that accept anonymized traffic (CORS-open, no API key, accept JSON-RPC batches). */
 export const PUBLIC_RPCS: Record<number, string[]> = {
   1: ['https://ethereum-rpc.publicnode.com', 'https://eth.drpc.org', 'https://1rpc.io/eth'],
   31337: ['http://127.0.0.1:8545'],
+  [ARKIV_CHAIN_ID]: [ARKIV_RPC],
 }
 
-/** Mainnet: Nym to a public RPC. The local fork: no mixnet exit can reach localhost, so passthrough. */
+/**
+ * Networks that cannot carry a chain's reads. Nym's worker drops the Content-Type header, which
+ * Arkiv's node requires (it answers 415); Nox tunnels TLS end to end and keeps every header.
+ */
+export const UNSUPPORTED: Record<number, Partial<Record<NetworkId, string>>> = {
+  [ARKIV_CHAIN_ID]: { nym: "drops the Content-Type header, which Arkiv's RPC requires" },
+}
+
+/**
+ * Mainnet: Nym to a public RPC. Arkiv: Nox (see UNSUPPORTED). The local fork: no mixnet exit can
+ * reach localhost, so passthrough.
+ */
 export function defaultSettings(chainId: number): ReadSettings {
-  return chainId === 1
-    ? { network: 'nym', rpc: PUBLIC_RPCS[1][0] }
-    : { network: 'passthrough', rpc: PUBLIC_RPCS[chainId]?.[0] ?? 'http://127.0.0.1:8545' }
+  if (chainId === 1) return { network: 'nym', rpc: PUBLIC_RPCS[1][0] }
+  if (chainId === ARKIV_CHAIN_ID) return { network: 'nox', rpc: ARKIV_RPC }
+  return { network: 'passthrough', rpc: PUBLIC_RPCS[chainId]?.[0] ?? 'http://127.0.0.1:8545' }
 }
 
 export const networkById = (id: NetworkId) => NETWORKS.find((n) => n.id === id)
@@ -133,10 +153,15 @@ export type Entry = {
 export type Phase = 'idle' | 'connecting' | 'ready' | 'failed'
 
 type State = {
+  /** the chain the dashboard manages; `settings`, `phase` and `error` describe its reads */
   chainId?: number
   settings?: ReadSettings
   phase: Phase
   error?: string
+  /** settings of every chain read so far (the main chain and Arkiv) */
+  routes: Record<number, ReadSettings>
+  /** per anon network: workers are shared by every chain routed through them */
+  phases: Partial<Record<AnonNetwork['id'], { phase: Phase; error?: string }>>
   entries: Entry[]
   /** individual JSON-RPC calls (a batch counts each call) and response bytes, by route */
   calls: Record<Route, number>
@@ -145,7 +170,7 @@ type State = {
 }
 
 const MAX_ENTRIES = 300
-let state: State = { phase: 'idle', entries: [], calls: { anon: 0, direct: 0, wallet: 0 }, bytes: { anon: 0, direct: 0, wallet: 0 }, logs: [] }
+let state: State = { phase: 'idle', routes: {}, phases: {}, entries: [], calls: { anon: 0, direct: 0, wallet: 0 }, bytes: { anon: 0, direct: 0, wallet: 0 }, logs: [] }
 const listeners = new Set<() => void>()
 let nextId = 1
 
@@ -227,16 +252,20 @@ const settingsKey = (chainId: number) => `navik:reads:${chainId}`
 
 export function settingsFor(chainId: number): ReadSettings {
   const saved = store.get<ReadSettings | undefined>(settingsKey(chainId), undefined)
-  const valid = saved && (saved.network === 'direct' || networkById(saved.network)) && /^https?:\/\//.test(saved.rpc)
+  const valid =
+    saved &&
+    (saved.network === 'direct' || networkById(saved.network)) &&
+    !UNSUPPORTED[chainId]?.[saved.network] &&
+    /^https?:\/\//.test(saved.rpc)
   return valid ? saved : defaultSettings(chainId)
 }
 
 export function saveSettings(chainId: number, settings: ReadSettings) {
   store.set(settingsKey(chainId), settings)
-  if (state.chainId === chainId) activate(chainId)
+  route(chainId, true)
 }
 
-let worker: { network: AnonNetwork['id']; instance: AnonRpcWorker } | undefined
+const workers = new Map<AnonNetwork['id'], AnonRpcWorker>()
 
 const SEL_HASH = toFunctionSelector('workerHash()')
 const SEL_RESOLVERS = toFunctionSelector('workerResolvers()')
@@ -253,46 +282,75 @@ function pinnedSpecifier(n: AnonNetwork) {
   }
 }
 
+/** Main chain's phase mirrors its network's, for the header and the viewer. */
+function setPhase(id: AnonNetwork['id'], phase: Phase, error?: string) {
+  const phases = { ...state.phases, [id]: { phase, error } }
+  const main = state.settings?.network === id ? { phase, error } : {}
+  setState({ phases, ...main })
+}
+
 function startWorker(n: AnonNetwork): AnonRpcWorker {
-  if (worker?.network === n.id) return worker.instance
-  worker?.instance.close()
+  const running = workers.get(n.id)
+  if (running) return running
   const instance = new AnonRpcWorker({ address: n.specifier, config: n.config, preExisting: { rpcProvider: pinnedSpecifier(n) } })
-  worker = { network: n.id, instance }
-  setState({ phase: 'connecting', error: undefined, logs: [] })
+  workers.set(n.id, instance)
+  setPhase(n.id, 'connecting')
   instance.ready.then(
-    () => worker?.instance === instance && setState({ phase: 'ready' }),
-    (err: unknown) => worker?.instance === instance && setState({ phase: 'failed', error: err instanceof Error ? err.message : String(err) }),
+    () => workers.get(n.id) === instance && setPhase(n.id, 'ready'),
+    (err: unknown) => workers.get(n.id) === instance && setPhase(n.id, 'failed', err instanceof Error ? err.message : String(err)),
   )
   void (async () => {
     for (;;) {
       const log = await instance.acceptLog().catch(() => undefined)
-      if (!log || worker?.instance !== instance) return
-      const line = `${log.level} ${log.args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')}`
+      if (!log || workers.get(n.id) !== instance) return
+      const line = `${n.name}: ${log.level} ${log.args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')}`
       setState({ logs: [...state.logs, line].slice(-200) })
     }
   })()
   return instance
 }
 
-/** Makes `chainId`'s settings current: (re)starts the worker when the network changed. */
-function activate(chainId: number): ReadSettings {
+/** Closes workers no chain is routed through anymore. */
+function stopUnused() {
+  const used = new Set(Object.values(state.routes).map((r) => r.network))
+  for (const [id, instance] of workers) {
+    if (used.has(id)) continue
+    instance.close()
+    workers.delete(id)
+    const { [id]: _, ...phases } = state.phases
+    setState({ phases })
+  }
+}
+
+/** Routes a chain's reads per its settings: starts the worker it needs. `main` marks the managed chain. */
+function route(chainId: number, reload = false): ReadSettings {
+  if (!reload && state.routes[chainId]) return state.routes[chainId]
   const settings = settingsFor(chainId)
+  setState({ routes: { ...state.routes, [chainId]: settings } })
+  stopUnused()
   const n = settings.network === 'direct' ? undefined : networkById(settings.network)
   if (n) startWorker(n)
-  else {
-    worker?.instance.close()
-    worker = undefined
-    setState({ phase: 'idle', error: undefined })
+  if (chainId === state.chainId) {
+    const p = n ? state.phases[n.id] : undefined
+    setState({ settings, phase: p?.phase ?? 'idle', error: p?.error })
   }
-  setState({ chainId, settings })
   return settings
 }
 
-/** Restarts a failed worker. */
+/** Makes `chainId` the managed chain (its reads drive the header and the viewer). */
+function activate(chainId: number): ReadSettings {
+  setState({ chainId })
+  return route(chainId, true)
+}
+
+/** Restarts failed workers. */
 export function reconnect() {
-  worker?.instance.close()
-  worker = undefined
-  if (state.chainId !== undefined) activate(state.chainId)
+  for (const [id, instance] of workers) {
+    if (state.phases[id]?.phase !== 'failed') continue
+    instance.close()
+    workers.delete(id)
+  }
+  for (const chainId of Object.keys(state.routes)) route(Number(chainId), true)
 }
 
 /**
@@ -300,7 +358,12 @@ export function reconnect() {
  * keys unlinkable (the dashboard and each viewed site get their own); support is per network.
  */
 export function readTransport(chainId: number, isolationKey?: string): Transport {
-  const settings = state.chainId === chainId && state.settings ? state.settings : activate(chainId)
+  const settings =
+    state.chainId === chainId && state.settings
+      ? state.settings
+      : chainId === ARKIV_CHAIN_ID
+        ? route(chainId)
+        : activate(chainId)
   const host = new URL(settings.rpc).host
   // mixnet round trips are slow: batch reads into one request, and allow for the first connection
   const opts = { batch: { batchSize: 16, wait: 16 }, timeout: 120_000, retryCount: 1 }
