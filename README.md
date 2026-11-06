@@ -17,6 +17,7 @@ promoted     portfolio.navik.eth → 3.portfolio.navik.eth
 - **Who may deploy is an ENSv2 permission.** The project owner grants a key "publish releases" and/or "change production", for that project only, and can revoke it at any time.
 - **Reading is private by default.** The dashboard and its built-in site viewer send every chain read through an [anon-rpc](https://ethereum.github.io/anon-rpc/) network (Nym by default). The RPC provider sees a mixnet exit, not who is looking at which project or site.
 - **Anyone can check that a site matches its source.** `navik verify <name> --against <build>` and `scripts/reproduce.sh` rebuild a site from its repo and compare it byte for byte with what the name serves.
+- **Provenance on Arkiv, source on Swarm.** `navik deploy --build <cmd>` records on [Arkiv](https://arkiv.network) which commit and command built a release, and puts the source on Swarm. Anyone who rebuilds it can attest the result, and the viewer shows "reproduced ×N" for any ERC-8244 site. See [Provenance](#provenance-on-arkiv-source-on-swarm).
 
 ## How it works
 
@@ -54,12 +55,13 @@ The dashboard is also a viewer for onchain sites: "Open a site" takes any ENS na
 - resolves the name through ENSv2's UniversalResolver;
 - reads the bytes from Ethereum in parallel chunks;
 - checks they are a genuine Navik release with a matching content hash;
-- renders the site in a sandboxed frame with an opaque origin, so it cannot reach the dashboard or the wallet.
+- renders the site in a sandboxed frame with an opaque origin, so it cannot reach the dashboard or the wallet;
+- shows where its code came from and who rebuilt it, read from Arkiv: repo, commit, build command, the source on Swarm, and every reproduction ([details](#provenance-on-arkiv-source-on-swarm)).
 
-You can drop a local build on the viewer to compare it with the release.
+You can drop a local build on the viewer to compare it with the release, then attest the result on Arkiv with your wallet.
 
 It is hosted on Navik itself:
-- The build is one self-contained HTML file (~296 KB, published compressed as 5 chunks, ~27M gas), with no CDN, web fonts or analytics: system fonts and inline SVG icons keep it small. Names and addresses get the ENS app's [etherloom](https://github.com/ensdomains/etherloom) identicons (generated locally, ~3.6 KB), addresses link to Blockscout, and every address and hash has a copy button. Its only external fetch is the pinned anon-rpc worker code.
+- The build is one self-contained HTML file (~340 KB, published compressed as 6 chunks, ~33M gas), with no CDN, web fonts or analytics: system fonts and inline SVG icons keep it small. Names and addresses get the ENS app's [etherloom](https://github.com/ensdomains/etherloom) identicons (generated locally, ~3.6 KB), addresses link to Blockscout, and every address and hash has a copy button. Its only external fetch is the pinned anon-rpc worker code.
 - It is published to the root project `app.navik.eth`, so `navik.eth` serves it.
 - Every version of the dashboard keeps its own permanent name (`1.app.navik.eth`, …).
 - The build is reproducible, so anyone can check that `navik.eth` serves the code in this repo (see [Verify a site against its source](#verify-a-site-against-its-source)).
@@ -73,10 +75,11 @@ PRIVATE_KEY=0x… ./scripts/deploy-app.sh   # build for the connected chain, dep
 A dapp's RPC provider normally sees your IP next to every address and name you look up. Here, it would see which projects you manage and which sites you open. The dashboard closes that leak with [anon-rpc](https://ethereum.github.io/anon-rpc/), via `@anon-rpc/browser-harness` (`app/src/reads.ts`):
 
 - **Every read goes through an anon-rpc worker:** ENS resolution, project and release listings, permission checks, event logs, gas simulation, transaction receipts and site bytes. The worker runs in a null-origin sandboxed iframe, and viem's `http()` transport uses its `fetch`.
-- **The wallet only signs.** The app sends the wallet just `eth_requestAccounts`, `eth_chainId`, `wallet_switchEthereumChain` and `eth_sendTransaction`. This exclusion is deliberate: a broadcast transaction is public anyway. The dashboard e2e asserts that the wallet receives no reads.
+- **The wallet only signs.** The app sends the wallet just `eth_requestAccounts`, `eth_chainId`, `wallet_switchEthereumChain` (plus `wallet_addEthereumChain` the first time you sign on Arkiv) and `eth_sendTransaction`. This exclusion is deliberate: a broadcast transaction is public anyway. The dashboard e2e asserts that the wallet receives no reads.
 - **The worker code is pinned in the app.** The harness normally reads each network's code hash from its specifier contract over a plain RPC before anything is anonymized. Navik instead embeds the hash and resolver URLs at build time. The harness still checks `keccak256(bundle)` before running it. As a result, no un-anonymized bootstrap read is ever made, and a given dashboard release (itself immutable) always runs the anonymizer code it was published with.
 - **It fails closed.** If the network is unreachable, reads stop with an error and a Reconnect button. Nothing silently falls back to a direct connection.
 - **Unrelated reads are kept apart.** The dashboard (keyed by account) and each opened site use separate `isolationKey`s, asking the network not to link them. Support depends on the network.
+- **Arkiv reads have a route of their own.** Release provenance and attestations come from Arkiv's RPC, also through anon-rpc: Nox by default, because Nym's worker (0.1.0) drops the `Content-Type` header, which Arkiv's node requires (it answers 415). Each network runs one worker, shared by every chain routed through it. The privacy panel configures both routes, and its counters include both.
 - **You can see where everything went.** The header shows the active network and how many calls went through anon-rpc. Clicking it opens a panel with a percentage meter, every request (route, method, latency, size) and the worker's log. There you can switch the network or RPC endpoint.
 
 | Network | Anonymizes | Connect | Per read (batch) | Worker size |
@@ -90,7 +93,7 @@ A dapp's RPC provider normally sees your IP next to every address and name you l
 All numbers were measured from headless Chromium. The Tor demo gateway could not be reached while this was written. No mixnet exit can reach `127.0.0.1`, so the local fork uses the passthrough worker. It exercises the same harness, sandbox and code path, but it does not anonymize. Throughput over Nym is about 15–20 KB/s. Because mixnet round trips are slow:
 - reads are batched into JSON-RPC batches;
 - release chunks and release listings are read in parallel;
-- compression (below) matters: the dashboard is 5 chunks instead of 12.
+- compression (below) matters: the dashboard is 6 chunks instead of 14.
 
 The CLI is not covered: anon-rpc has no published Node harness yet. Point `--rpc` at your own node if you need private CLI reads.
 
@@ -109,6 +112,53 @@ scripts/reproduce.sh navik.eth https://github.com/<org>/navik <commit> \
 
 The viewer has the same check: drop the file on "Compare with a local build". The dashboard's own build is deterministic: the lockfile pins every dependency, and the deployment addresses are committed. `scripts/test-all.sh` rebuilds it after publishing and checks that the rebuild matches what `navik.eth` serves.
 
+## Provenance on Arkiv, source on Swarm
+
+Ethereum proves which bytes a name serves, but not which code they came from. Storing a repo URL, commit and build command in bytecode for every release would cost gas, and could never be corrected. Navik keeps that layer on [Arkiv](https://arkiv.network) (testnet: Rabdi) and the source itself on [Swarm](https://www.ethswarm.org):
+
+| What | Where | Written by |
+|---|---|---|
+| Site bytes, names, content hash, who may publish | Ethereum | the publisher (as before) |
+| `navik.provenance`: repo, commit, build command, output path, notes, Swarm reference + keccak256 of the source | Arkiv | the publisher's deploy key |
+| `git archive <commit>` (one tar) | Swarm | the publisher |
+| `navik.attestation`: "I rebuilt these bytes: match / mismatch" | Arkiv | anyone |
+
+- **Trust comes from Ethereum.** Anyone can write a provenance record for any release. A client trusts one only if its `$creator` (fixed at creation) is the `publisher` the Navik factory logged in `DeploymentPublished` for that release. Others are shown as ignored.
+- **Attestations follow the content,** queried by `contentHash`, so they work for any ERC-8244 site and survive re-publishing the same bytes.
+- **Records never change and anyone can keep them.** Both kinds are created `readonly`, with `permissionlessExtension`, for 180 days (Arkiv's cap is ~182.5). `navik keep-alive` or the viewer's "Keep alive" extends them, from any wallet.
+- **The source is checked, not trusted.** `navik reproduce` downloads the tar from Swarm and checks three things before building: its keccak256 equals `sourceHash`, the commit embedded in the tar equals `commit`, and after the build, the file is byte-identical to what the name serves.
+- **It is optional.** Nothing about serving or verifying a site needs Arkiv or Swarm. If Arkiv is unreachable, the viewer says so and still renders the site, verified from Ethereum.
+
+```bash
+export ARKIV_PRIVATE_KEY=0x…                 # tGLM from https://hub.arkiv.network/faucet; defaults to PRIVATE_KEY
+export SWARM_API=http://127.0.0.1:1633 SWARM_BATCH=<postage batch>   # bee or Freedom's antd; only for --swarm
+
+node cli/src/cli.ts deploy portfolio dist/index.html --build "npm ci && npm run build" --swarm --notes "v3"
+node cli/src/cli.ts record 2.portfolio dist/index.html --build "npm ci && npm run build"   # an existing release
+node cli/src/cli.ts provenance portfolio      # source, publisher check, reproductions (no key needed)
+node cli/src/cli.ts reproduce portfolio --yes --attest   # rebuild from Swarm (or --git), compare, attest
+node cli/src/cli.ts verify portfolio --against ./index.html --attest
+node cli/src/cli.ts keep-alive portfolio
+NAVIK_PROVENANCE=1 ./scripts/deploy-app.sh    # the dashboard records its own provenance
+```
+
+`reproduce` runs the publisher's build command on your machine, so it shows the command and waits for `--yes`. Use a container if you don't trust the publisher.
+
+Writing wallets on Rabdi:
+- `0x09D1F0ebF181503417b74203A1a924A8145830F5`: test and demo records (chain id 31337, the local fork)
+<!-- TODO(team): add the mainnet publisher once navik.eth's dashboard records its provenance -->
+
+Query the records yourself (no key, no SDK):
+
+```bash
+curl -s https://rpc.rabdi.db-chain.testnet.arkiv.network -H 'content-type: application/json' --data @- <<'EOF'
+{"jsonrpc":"2.0","id":1,"method":"arkiv_query","params":["arkiv.schema = str('navik.provenance')",
+ {"select":{"key":true,"creator":true,"expiresAt":true,"attributes":true},"limit":"0x10"}]}
+EOF
+```
+
+More detail in [`arkiv/`](arkiv/): [schema](arkiv/schema.md), [how we use Arkiv](arkiv/how-you-use-arkiv.md), [why Arkiv](arkiv/why-arkiv.md), [reach](arkiv/reach.md), [Swarm](arkiv/swarm.md) and [friction](arkiv/friction.md).
+
 ## ENSv2 features used
 
 | ENSv2 feature | What it does in Navik | Change it → what users see |
@@ -126,9 +176,9 @@ The viewer has the same check: drop the file on "Compare with a local build". Th
 
 ## CROPS
 
-- **C:** We control the `navik.eth` name, and nothing else is ours: no server, gateway, indexer or relayer. Sites, names and the dashboard all live on Ethereum, and any RPC can serve them. If we disappear, renewing `navik.eth` is permissionless. Once it is frozen, we cannot repoint it either. If an anon-rpc network or RPC provider refuses you, pick another network or endpoint in the privacy panel.
+- **C:** We control the `navik.eth` name, and nothing else is ours: no server, gateway, indexer or relayer. Sites, names and the dashboard all live on Ethereum, and any RPC can serve them. If we disappear, renewing `navik.eth` is permissionless. Once it is frozen, we cannot repoint it either. If an anon-rpc network or RPC provider refuses you, pick another network or endpoint in the privacy panel. Provenance and attestations live on Arkiv, a public network where anyone can write, read and extend them; nothing about serving or verifying a site depends on them.
 - **O:** MIT. The repo alone builds and runs everything: contracts, CLI, dashboard and a local mainnet fork. The dashboard build is reproducible, and `scripts/reproduce.sh` proves that `navik.eth` serves this code.
-- **P:** By default the RPC provider sees reads arriving from a Nym exit, not your IP. The wallet only sees signing requests. The CDN serving the pinned anon-rpc worker sees that you use it, but not what you read. Navik runs no backend and no analytics. Details are [below](#what-each-party-learns).
+- **P:** By default the RPC provider sees reads arriving from a Nym exit, not your IP, and Arkiv's RPC sees provenance lookups arriving from Nox. The wallet only sees signing requests. The CDN serving the pinned anon-rpc worker sees that you use it, but not what you read. Navik runs no backend and no analytics. Details are [below](#what-each-party-learns).
 - **S:** Keys never leave your wallet. The anon-rpc worker is hash-pinned code in a null-origin sandbox, and opened sites run sandboxed with no access to the dashboard or wallet. Releases are checked against their onchain content hash. The trust assumptions are your RPC's answers and ENSv2's core contracts; see the security phases below.
 
 ### What each party learns
@@ -138,11 +188,12 @@ The viewer has the same check: drop the file on "Compare with a local build". Th
 | RPC provider (default `ethereum-rpc.publicnode.com`, reached through the mixnet) | The reads themselves: names, project accounts, release addresses. Reads under one `isolationKey` may be linkable to each other | Your IP. Which reads belong to the same person across isolation keys (if the network honours them) |
 | anon-rpc network (Nym mix nodes and exit) | Mix nodes: nothing. Exit: that some client is talking to the RPC host | Who you are; with Nox, the request contents (TLS ends inside the worker) |
 | Worker CDN (jsDelivr, unpkg or GitHub, one fetch per network, cached) | Your IP, and that you load an anon-rpc worker | Anything you read |
-| Your wallet and its RPC | Your account, chain and the transactions you sign (public once sent) | What you browse or manage in the dashboard |
+| Arkiv RPC (Rabdi, reached through Nox) | Which sites' provenance and attestations are looked up | Your IP |
+| Your wallet and its RPC | Your account, chain and the transactions you sign (public once sent), including attestations you sign on Arkiv | What you browse or manage in the dashboard |
 | Navik (the team) | Nothing: there is no server | — |
 | Sites you open in the viewer | Nothing about the dashboard: opaque origin, no wallet | — |
 
-The CLI talks only to the RPC you pass. It has no anon-rpc support yet (see [Private reads](#private-reads-anon-rpc)).
+The CLI talks only to the RPC you pass, Arkiv's RPC (`ARKIV_RPC`) and, for `--swarm` and `reproduce`, the Swarm node or gateway (`SWARM_API`). It has no anon-rpc support yet (see [Private reads](#private-reads-anon-rpc)).
 
 ### Security
 
@@ -195,9 +246,14 @@ node src/cli.ts ls portfolio
 node src/cli.ts verify portfolio
 node src/cli.ts verify portfolio --against ./index.html      # is this build what's live?
 node src/cli.ts open 2.portfolio.navik.eth
+node src/cli.ts provenance portfolio                         # source and reproductions, from Arkiv
 
-# full CLI flow (claim → deploy → grants → rollback → multi-chunk → revoke → isolation → demote)
+# full CLI flow (claim → deploy → grants → rollback → multi-chunk → revoke → isolation → demote);
+# with ARKIV_PRIVATE_KEY set (tGLM on Rabdi) also provenance → Swarm (local stand-in) → reproduce → attest
 pnpm run e2e
+
+# SDK: Arkiv calldata for browser wallets is byte-identical to the Arkiv SDK's
+pnpm -C ../sdk test
 
 # dashboard: dev server, or the headless-browser e2e (wallet injected; reads go through the
 # passthrough anon-rpc worker to the fork, and the test asserts the wallet only signs)
@@ -219,7 +275,7 @@ node ../cli/src/cli.ts verify navik.eth --raw --out /tmp/navik.html && APP_FILE=
 
    This deploys the contracts and points navik.eth at them. It writes `contracts/deployments/1.json`, which the CLI reads, plus `1-<block>.json` as a record. Commit both: the dashboard build embeds `1.json`, so a reproducible build needs it.
 
-3. Publish the dashboard so `navik.eth` serves it (~27M gas), then check it against the commit:
+3. Publish the dashboard so `navik.eth` serves it (~33M gas), then check it against the commit:
 
    ```bash
    RPC_URL=$MAINNET_RPC_URL PRIVATE_KEY=$OWNER_KEY ./scripts/deploy-app.sh
@@ -257,7 +313,7 @@ Mainnet caps a transaction at 2^24 gas (EIP-7825), so the CLI uploads at most 2 
 
 | Site | Raw | Compressed |
 |---|---|---|
-| Navik dashboard (JS bundle, incl. the anon-rpc harness) | 296 KB, 13 chunks | 121 KB, 5 chunks (~27M gas) |
+| Navik dashboard (JS bundle, incl. the anon-rpc harness and Arkiv) | 340 KB, 14 chunks | 141 KB, 6 chunks (~33M gas) |
 | Text-heavy page | 114 KB, 5 chunks, ~27M gas | 9 KB, 1 chunk, 2.2M gas |
 
 Trade-offs:
@@ -271,4 +327,5 @@ Trade-offs:
 - **Viewer sandbox:** sites opened in the dashboard run without wallet access. Sites that need a wallet render in ERC-8244 browsers or through `navik open`.
 - **Read integrity:** reads are anonymized but not proven. A lying RPC could serve a false release consistently with its manifest. A light client or `eth_getProof` checks would remove that trust.
 - **CLI reads are not anonymized** (no Node anon-rpc harness yet).
+- **Provenance is on a testnet.** Arkiv's Rabdi is a testnet, and records expire 180 days after their last extension unless someone extends them.
 - **Dashboard wallets:** browser-injected wallets only (EIP-6963), no WalletConnect, so there's no relay server.
