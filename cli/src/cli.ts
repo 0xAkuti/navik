@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Command, Option } from 'commander'
 import * as navik from '@navik/sdk'
-import { type Address, getAddress, isAddress } from 'viem'
+import { type Address, getAddress, type Hex, isAddress } from 'viem'
 
-import { type GlobalOptions, loadCtx } from './config.ts'
+import { type GlobalOptions, loadArkiv, loadArkivWriter, loadCtx, swarmApi, swarmBatch } from './config.ts'
+import { extractTar, gitArchive, gitCheckout, type GitSource, gitSource, runBuild, tarCommit } from './source.ts'
 
 const program = new Command()
   .name('navik')
@@ -69,8 +70,14 @@ program
   .option('--promote', 'also make it production')
   .option('--compress', 'store gzip-wrapped with a small loader (cheaper; the site then needs JavaScript)')
   .option('--dry-run', 'print the plan only')
-  .action(async (project: string, file: string, opts: { promote?: boolean; compress?: boolean; dryRun?: boolean }) => {
+  .option('--build <command>', 'record provenance on Arkiv: the command (run at the repo root) that built <file>')
+  .option('--repo <url>', 'with --build: public URL of the source repo (default: the origin remote)')
+  .option('--swarm', 'with --build: also put the source (git archive of the commit) on Swarm')
+  .option('--notes <text>', 'with --build: release notes')
+  .action(async (project: string, file: string, opts: DeployOptions) => {
     const c = await ctx()
+    // fail before spending gas: a dirty tree or an oversized field cannot become provenance
+    const source = opts.build ? gitSource(file, opts.repo) : undefined
     const plan = await navik.planPublish(c, project, new Uint8Array(readFileSync(file)), { compress: opts.compress })
     const reused = plan.chunks.filter((ch) => ch.stored).length
     const txs = plan.singleTx ? 1 : plan.uploads.length + 1
@@ -94,6 +101,135 @@ program
       const tx = await navik.promote(c, project, plan.predicted)
       console.log(`promoted     ${navik.projectName(c, project)} → ${plan.name} (tx ${tx})`)
     }
+    if (source && opts.build) {
+      await recordSource(c, { name: plan.name, project: navik.projectName(c, project), site: plan.predicted }, plan, source, opts.build, opts)
+    }
+  })
+
+program
+  .command('record')
+  .description('record on Arkiv which source and build command produced an existing release')
+  .argument('<name>', 'the release, e.g. 3.portfolio or navik.eth')
+  .argument('<file>', 'the built file, inside a clean git checkout of the source')
+  .requiredOption('--build <command>', 'the command (run at the repo root) that built <file>')
+  .option('--repo <url>', 'public URL of the source repo (default: the origin remote)')
+  .option('--swarm', 'also put the source (git archive of the commit) on Swarm')
+  .option('--notes <text>', 'release notes')
+  .action(async (name: string, file: string, opts: DeployOptions & { build: string }) => {
+    const c = await ctx()
+    const source = gitSource(file, opts.repo)
+    const v = await navik.verify(c, name)
+    if (!v.hashMatches) throw new Error(`${v.name} failed verification; run \`navik verify\``)
+    if (!navik.compareBuild(v, readFileSync(file)).matches) throw new Error(`${file} is not what ${v.name} serves`)
+    const release = v.releaseName ?? v.name
+    const project = v.project ? navik.projectName(c, v.project) : v.name
+    const version = v.version ?? 0n
+    await recordSource(c, { name: release, project, site: v.deployment }, { version, contentHash: v.contentHash }, source, opts.build, opts)
+  })
+
+program
+  .command('provenance')
+  .description('show the source a site was built from and who reproduced it (from Arkiv)')
+  .argument('<name>', 'any name with a contentcontract record')
+  .action(async (name: string) => {
+    const c = await ctx()
+    const v = await navik.verify(c, name)
+    const r = await siteRecords(c, v)
+    console.log(`${v.name} → ${v.deployment}  content ${v.contentHash}`)
+    if (r.trusted) {
+      const p = r.trusted
+      console.log(`  source     ${p.repo} @ ${p.commit}`)
+      console.log(`  build      ${p.build}  →  ${p.output}`)
+      if (p.sourceSwarm) console.log(`  on Swarm   ${navik.swarmLinks(p.sourceSwarm).bzz}  (keccak256 ${p.sourceHash})`)
+      if (p.notes) console.log(`  notes      ${p.notes}`)
+      console.log(`  written by ${p.creator}, the publisher  · entity ${p.key}  · expires ${r.expires(p.expiresAt)}`)
+    } else {
+      console.log(r.publisher ? `  no provenance from the publisher ${r.publisher}` : '  no publisher known (not a Navik release): provenance below is unverified')
+    }
+    for (const p of r.provenance.filter((p) => p !== r.trusted)) {
+      console.log(`  ✗ ignored  provenance by ${p.creator} (not the publisher): ${p.repo} @ ${p.commit.slice(0, 12)}`)
+    }
+    const ok = r.attestations.filter((a) => a.result === 'match')
+    console.log(`  reproduced by ${ok.length} builder(s)${ok.length < r.attestations.length ? `, ${r.attestations.length - ok.length} could not` : ''}`)
+    for (const a of r.attestations) {
+      console.log(`    ${a.result === 'match' ? '✓' : '✗'} ${a.creator}  ${a.commit ? `@ ${a.commit.slice(0, 12)} ` : ''}via ${a.tool}  · entity ${a.key}`)
+    }
+  })
+
+program
+  .command('reproduce')
+  .description('rebuild a site from the source its publisher recorded, compare byte for byte, optionally attest on Arkiv')
+  .argument('<name>', 'any name with a contentcontract record')
+  .option('--git', 'fetch the source from its git repo even if it is on Swarm')
+  .option('--attest', 'publish the result (match or mismatch) as an attestation on Arkiv')
+  .option('--yes', "run the recorded build command (it is the publisher's code: read it first, or use a sandbox)")
+  .action(async (name: string, opts: { git?: boolean; attest?: boolean; yes?: boolean }) => {
+    const c = await ctx()
+    const v = await navik.verify(c, name)
+    if (!v.hashMatches) throw new Error(`${v.name} failed verification; run \`navik verify\``)
+    const { trusted } = await siteRecords(c, v)
+    if (!trusted) throw new Error(`${v.name} has no provenance from its publisher; use scripts/reproduce.sh with a repo and command of your choice`)
+    console.log(`source  ${trusted.repo} @ ${trusted.commit}`)
+    console.log(`build   ${trusted.build}  →  ${trusted.output}`)
+    if (!opts.yes) {
+      console.log('re-run with --yes to run this build command on your machine')
+      process.exitCode = 2
+      return
+    }
+    const work = mkdtempSync(join(tmpdir(), 'navik-reproduce-'))
+    try {
+      const dir = join(work, 'src')
+      mkdirSync(dir)
+      if (trusted.sourceSwarm && !opts.git) {
+        const api = swarmApi()
+        console.log(`fetch   ${trusted.sourceSwarm} from ${api}`)
+        const tar = await navik.swarmDownload(api, trusted.sourceSwarm, trusted.sourceHash)
+        const commit = tarCommit(tar)
+        if (commit !== trusted.commit) throw new Error(`the Swarm source is commit ${commit}, provenance says ${trusted.commit}`)
+        console.log(`        ✓ keccak256 matches the provenance, commit ${commit}`)
+        extractTar(tar, dir)
+      } else {
+        rmSync(dir, { recursive: true })
+        gitCheckout(trusted.repo, trusted.commit, dir)
+      }
+      runBuild(dir, trusted.build)
+      const built = readFileSync(join(dir, trusted.output))
+      const cmp = navik.compareBuild(v, built)
+      console.log(cmp.matches ? `✓ byte-identical to ${v.name}` : `✗ the rebuild (keccak256 ${cmp.hash}) differs from ${v.name}`)
+      if (!cmp.matches) process.exitCode = 1
+      if (opts.attest) {
+        const { entityKey, txHash } = await navik.attest(loadArkivWriter(), {
+          chainId: c.publicClient.chain.id,
+          site: v.deployment,
+          contentHash: v.contentHash,
+          name: v.name,
+          result: cmp.matches ? 'match' : 'mismatch',
+          builtHash: cmp.hash,
+          provenance: trusted.key,
+          repo: trusted.repo,
+          commit: trusted.commit,
+          build: trusted.build,
+          tool: 'navik-cli',
+        })
+        console.log(`attested on Arkiv: entity ${entityKey} (tx ${txHash})`)
+      }
+    } finally {
+      rmSync(work, { recursive: true, force: true })
+    }
+  })
+
+program
+  .command('keep-alive')
+  .description("extend a site's provenance and attestations on Arkiv to the maximum lifetime (anyone may)")
+  .argument('<name>')
+  .action(async (name: string) => {
+    const c = await ctx()
+    const v = await navik.verify(c, name)
+    const r = await siteRecords(c, v)
+    const keys = [...(r.trusted ? [r.trusted.key] : []), ...r.attestations.map((a) => a.key)]
+    if (keys.length === 0) return console.log(`${v.name}: nothing on Arkiv to extend`)
+    const res = await navik.keepAlive(loadArkivWriter(), keys)
+    console.log(`extended ${keys.length} entit${keys.length === 1 ? 'y' : 'ies'} by ${navik.ARKIV_LIFETIME_DAYS} days (tx ${res?.txHash})`)
   })
 
 program
@@ -190,7 +326,8 @@ program
   .option('--out <file>', 'write the verified HTML to a file (the original document if gzip-wrapped)')
   .option('--raw', 'with --out: write the exact stored bytes, even if gzip-wrapped')
   .option('--against <file>', 'check a local build (e.g. from the source repo) is byte-identical to the release')
-  .action(async (name: string, opts: { out?: string; raw?: boolean; against?: string }) => {
+  .option('--attest', 'with --against: publish the result as an attestation on Arkiv')
+  .action(async (name: string, opts: { out?: string; raw?: boolean; against?: string; attest?: boolean }) => {
     const c = await ctx()
     const v = await navik.verify(c, name)
     const ok = v.isNavikDeployment && v.hashMatches && v.belongsToProject !== false
@@ -208,6 +345,20 @@ program
           : `  ✗ ${opts.against} (keccak256 ${local.hash}) differs from the release`,
       )
       if (!local.matches) process.exitCode = 1
+      if (opts.attest) {
+        const { trusted } = await siteRecords(c, v)
+        const { entityKey, txHash } = await navik.attest(loadArkivWriter(), {
+          chainId: c.publicClient.chain.id,
+          site: v.deployment,
+          contentHash: v.contentHash,
+          name: v.name,
+          result: local.matches ? 'match' : 'mismatch',
+          builtHash: local.hash,
+          provenance: trusted?.key,
+          tool: 'navik-cli',
+        })
+        console.log(`  attested on Arkiv: entity ${entityKey} (tx ${txHash})`)
+      }
     }
     if (opts.out) {
       const bytes = v.original && !opts.raw ? v.original.html : v.html
@@ -231,6 +382,64 @@ program
     writeFileSync(file, v.original?.html ?? v.html)
     console.log(pathToFileURL(file).href)
   })
+
+type DeployOptions = {
+  promote?: boolean
+  compress?: boolean
+  dryRun?: boolean
+  build?: string
+  repo?: string
+  swarm?: boolean
+  notes?: string
+}
+
+/** Uploads the source to Swarm (optional), then writes the release's provenance to Arkiv. */
+async function recordSource(
+  c: navik.Ctx,
+  release: { name: string; project: string; site: Address },
+  plan: { version: bigint; contentHash: Hex },
+  source: GitSource,
+  build: string,
+  opts: DeployOptions,
+) {
+  let swarm: { reference: string; hash: Hex } | undefined
+  if (opts.swarm) {
+    const tar = gitArchive(source.root, source.commit)
+    swarm = await navik.swarmUpload(swarmApi(), swarmBatch(), tar, { name: `${source.commit}.tar`, contentType: 'application/x-tar' })
+    console.log(`source       ${navik.swarmLinks(swarm.reference).bzz} (${tar.length} bytes, git archive ${source.commit.slice(0, 12)})`)
+  }
+  const { entityKey, txHash } = await navik.recordProvenance(loadArkivWriter(), {
+    chainId: c.publicClient.chain.id,
+    site: release.site,
+    contentHash: plan.contentHash,
+    name: release.name,
+    project: release.project,
+    version: plan.version,
+    repo: source.repo,
+    commit: source.commit,
+    build,
+    output: source.output,
+    sourceSwarm: swarm?.reference,
+    sourceHash: swarm?.hash,
+    notes: opts.notes,
+  })
+  console.log(`provenance   ${source.repo} @ ${source.commit.slice(0, 12)} → Arkiv entity ${entityKey} (tx ${txHash})`)
+}
+
+/** A site's records on Arkiv, and which provenance is trusted (written by the release's publisher). */
+async function siteRecords(c: navik.Ctx, v: navik.Verification) {
+  const arkiv = loadArkiv()
+  const chainId = c.publicClient.chain.id
+  const [provenance, attestations, publisher, block] = await Promise.all([
+    navik.provenanceOf(arkiv, chainId, v.deployment),
+    navik.attestationsOf(arkiv, chainId, v.contentHash),
+    v.isNavikDeployment ? navik.publisherOf(c, v.deployment) : undefined,
+    arkiv.getBlockNumber(),
+  ])
+  const trusted = navik.trustedProvenance(provenance, publisher)
+  const expires = (at: bigint) => navik.expiryDate(at, block).toISOString().slice(0, 10)
+  return { provenance, attestations, publisher, trusted, expires }
+}
 
 function addr(value: string): Address {
   if (!isAddress(value)) throw new Error(`not an address: ${value}`)
