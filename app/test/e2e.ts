@@ -8,7 +8,7 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { arkivChain } from '@navik/sdk'
 import { chromium, type Page } from 'playwright'
-import { createWalletClient, type Hex, http } from 'viem'
+import { createWalletClient, encodeFunctionData, type Hex, http, parseAbi } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 
 const RPC = process.env.RPC_URL ?? 'http://127.0.0.1:8545'
@@ -102,6 +102,33 @@ async function pickBuild(page: Page, v: number, options?: () => Promise<void>) {
 async function finishDeploy(page: Page, button: 'Deploy' | 'Deploy and promote') {
   await modal(page).getByRole('button', { name: button, exact: true }).click()
   await modal(page).getByRole('button', { name: 'Done' }).click()
+}
+
+async function rpc(method: string, params: unknown[] = []) {
+  const res = await fetch(RPC, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) })
+  const json = await res.json()
+  if (json.error) throw new Error(`${method}: ${json.error.message}`)
+  return json.result
+}
+
+/** Registers `<label>.eth` for `owner` on the fork, as ENSv2's ETHRegistrar does after a purchase. */
+async function registerEth(label: string, owner: string) {
+  const registrar = '0xD6D8369e55c94Ae8AFA714E6cF7AB5bE54D5CC81'
+  const roles = (1n << 20n) | ((1n << 20n) << 128n) | (1n << 24n) | ((1n << 24n) << 128n) | ((1n << 28n) << 128n)
+  const data = encodeFunctionData({
+    abi: parseAbi(['function register(string,address,address,address,uint256,uint64)']),
+    args: [label, owner as Hex, '0x0000000000000000000000000000000000000000', '0x000000000000000000000000000000000000dEaD', roles, BigInt(Math.floor(Date.now() / 1000) + 365 * 86400)],
+  })
+  await rpc('anvil_impersonateAccount', [registrar])
+  await rpc('anvil_setBalance', [registrar, '0xde0b6b3a7640000'])
+  const hash = await rpc('eth_sendTransaction', [{ from: registrar, to: '0xf60aba43E1f7F3DAB1186Ff03B561401C9Df85E2', data }])
+  await rpc('anvil_stopImpersonatingAccount', [registrar])
+  let receipt
+  for (let i = 0; i < 50 && !receipt; i++) {
+    receipt = await rpc('eth_getTransactionReceipt', [hash])
+    if (!receipt) await new Promise((r) => setTimeout(r, 200))
+  }
+  assert.equal(receipt?.status, '0x1', `registering ${label}.eth`)
 }
 
 const browser = await chromium.launch()
@@ -206,6 +233,27 @@ try {
     await row.waitFor()
     await row.getByRole('button', { name: 'Revoke deploy' }).click()
     await page.getByText('No keys granted.').waitFor()
+    await page.locator('.tabs').getByRole('link', { name: 'Releases' }).click()
+  })
+
+  await step('link a custom domain: it serves production, then unlink it', async () => {
+    const domain = `${project}site.eth`
+    await registerEth(`${project}site`, ALICE)
+    await page.locator('.tabs').getByRole('link', { name: 'Domains' }).click()
+    await page.getByText('No domains linked yet.').waitFor()
+    await page.getByPlaceholder('alice.eth, or a subname you own').fill(domain)
+    await page.getByRole('button', { name: 'Check' }).click()
+    await page.locator('.domain-check').getByText('Linking records what it points at now').waitFor()
+    await shot(page, { path: `${SHOTS}-2b-domain-check.png`, fullPage: true })
+    await page.getByRole('button', { name: `Link ${domain} (3 transactions)` }).click()
+    const row = page.locator('.domain-row', { hasText: domain })
+    await row.getByText('Linked').waitFor()
+    await shot(page, { path: `${SHOTS}-2c-domains.png`, fullPage: true })
+    await row.getByRole('link', { name: domain }).click()
+    await siteFrame(page).getByText('hello from v1').waitFor()
+    await page.goBack()
+    await row.getByRole('button', { name: 'Unlink' }).click()
+    await page.getByText('No domains linked yet.').waitFor()
     await page.locator('.tabs').getByRole('link', { name: 'Releases' }).click()
   })
 
