@@ -1,3 +1,4 @@
+import { generatePatternDataURI } from '@ensdomains/etherloom'
 import type { ComponentChildren } from 'preact'
 import { useEffect } from 'preact/hooks'
 
@@ -56,19 +57,21 @@ export function Logo(props: { size?: number }) {
   )
 }
 
-/** ENS-style gradient avatar, derived from the name or address so it is stable everywhere. */
+const identicons = new Map<string, string>()
+
+/**
+ * The ENS app's identicon: an etherloom weave in ENS lapis, seeded by the name or address
+ * exactly as the ENS manager seeds it, so a name looks the same here as it does there.
+ */
 export function Avatar(props: { seed: string; size?: number }) {
-  let h = 2166136261
-  for (let i = 0; i < props.seed.length; i++) h = Math.imul(h ^ props.seed.charCodeAt(i), 16777619)
-  const a = (h >>> 0) % 360
-  const b = (a + 40 + ((h >>> 9) % 80)) % 360
+  const key = props.seed.toLowerCase()
+  let src = identicons.get(key)
+  if (!src) {
+    src = generatePatternDataURI(key, 'ENS Vertical Pairs', '#0082BB', { cellSize: 10, width: 96, height: 96, padding: 10 })
+    identicons.set(key, src)
+  }
   const s = props.size ?? 20
-  return (
-    <span
-      class="avatar"
-      style={{ width: `${s}px`, height: `${s}px`, background: `linear-gradient(135deg, hsl(${a} 85% 68%), hsl(${b} 80% 52%))` }}
-    />
-  )
+  return <img class="avatar" src={src} alt="" width={s} height={s} draggable={false} />
 }
 
 export function Spinner() {
@@ -96,7 +99,7 @@ export function Modal(props: { title: string; onClose: () => void; children: Com
   )
 }
 
-/** A name with its gradient avatar, as ENS shows names. */
+/** A name with its identicon, as ENS shows names. */
 export function Name(props: { name: string; size?: number }) {
   return (
     <span class="name">

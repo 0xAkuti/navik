@@ -13,6 +13,7 @@
   "license": "MIT",
   "dependencies": {
     "@anon-rpc/browser-harness": "0.4.0",
+    "@ensdomains/etherloom": "0.1.0-alpha.4",
     "@navik/sdk": "workspace:*",
     "preact": "^11.1.1",
     "viem": "^2.57.16"

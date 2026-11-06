@@ -13,6 +13,9 @@ importers:
       '@anon-rpc/browser-harness':
         specifier: 0.4.0
         version: 0.4.0
+      '@ensdomains/etherloom':
+        specifier: 0.1.0-alpha.4
+        version: 0.1.0-alpha.4
       '@navik/sdk':
         specifier: workspace:*
         version: link:../sdk
@@ -174,6 +177,10 @@ packages:
   '@babel/types@7.29.11':
     resolution: {integrity: sha512-WCsemW40Cpc6gouC1SrY6PBaZ+oLRlEVY9XBvZBI7il/HyUrb2nJ505wE1MHEFyDZNnrWDEuy4jL50WVHfTTSQ==}
     engines: {node: '>=6.9.0'}
+
+  '@ensdomains/etherloom@0.1.0-alpha.4':
+    resolution: {integrity: sha512-tvyxmi0V7n1G/JbkX91SkAPl045xIp+vJ51yrD8gKp2zsquh67KKAyxlPJVC4jJUb/6G9nEjPoNOozIEBBdesA==}
+    engines: {node: '>=18'}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -1026,6 +1033,8 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.29.13
       '@babel/helper-validator-identifier': 7.29.7
+
+  '@ensdomains/etherloom@0.1.0-alpha.4': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
