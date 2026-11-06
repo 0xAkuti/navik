@@ -1,10 +1,15 @@
 // Drives the built single-file app (dist/index.html) in headless Chromium against a local
 // mainnet fork with Navik deployed (scripts/dev-fork.sh). A test wallet is injected via
 // EIP-6963 and forwards every request to anvil, whose dev accounts are unlocked.
+// With ARKIV_PRIVATE_KEY (tGLM on Arkiv's testnet), the wallet also signs on Arkiv with that key,
+// and the viewer's attestation and keep-alive are exercised against the real testnet.
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { arkivChain } from '@navik/sdk'
 import { chromium, type Page } from 'playwright'
+import { createWalletClient, type Hex, http } from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
 
 const RPC = process.env.RPC_URL ?? 'http://127.0.0.1:8545'
 const ALICE = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8' // anvil #1
@@ -16,14 +21,21 @@ const SHOTS = process.env.SHOTS ?? '/tmp/navik-app'
 const project = `web${Date.now().toString(36)}`
 const site = (v: number) => Buffer.from(`<!doctype html><title>${project}</title><h1>hello from v${v}</h1>`)
 
-function injectWallet({ rpc, account }: { rpc: string; account: string }) {
+function injectWallet({ rpc, account, arkiv }: { rpc: string; account: string; arkiv: string }) {
   let id = 0
+  let onArkiv = false
   const seen: string[] = ((window as unknown as { walletMethods: string[] }).walletMethods = [])
   const provider = {
     async request({ method, params }: { method: string; params?: unknown[] }) {
       seen.push(method)
       if (method === 'eth_requestAccounts' || method === 'eth_accounts') return [account]
-      if (method === 'wallet_switchEthereumChain') return null
+      if (method === 'wallet_switchEthereumChain') {
+        onArkiv = (params?.[0] as { chainId: string }).chainId === arkiv
+        return null
+      }
+      // on Arkiv, the test signs in Node with ARKIV_PRIVATE_KEY (see arkivSend)
+      if (onArkiv && method === 'eth_chainId') return arkiv
+      if (onArkiv && method === 'eth_sendTransaction') return (window as unknown as { arkivSend: (tx: unknown) => Promise<string> }).arkivSend(params?.[0])
       const res = await fetch(rpc, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -101,7 +113,12 @@ page.on('request', (r) => {
 })
 page.on('pageerror', (e) => console.error('page error:', e.message))
 await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
-await page.addInitScript(injectWallet, { rpc: RPC, account: ALICE })
+await page.addInitScript(injectWallet, { rpc: RPC, account: ALICE, arkiv: `0x${arkivChain().id.toString(16)}` })
+const ARKIV_KEY = process.env.ARKIV_PRIVATE_KEY as Hex | undefined
+if (ARKIV_KEY) {
+  const arkivWallet = createWalletClient({ account: privateKeyToAccount(ARKIV_KEY), chain: arkivChain(), transport: http() })
+  await page.exposeFunction('arkivSend', (tx: { to: Hex; data: Hex }) => arkivWallet.sendTransaction({ to: tx.to, data: tx.data }))
+}
 await page.addInitScript(arkivPassthrough, ARKIV_RPC)
 
 try {
@@ -254,6 +271,22 @@ try {
     await siteFrame(page).getByText('hello from v1').waitFor()
     await page.locator('.meter p', { hasText: /· [1-9]\d* direct/ }).waitFor() // the drawer is still open
   })
+
+  if (ARKIV_KEY) {
+    await step('attest a reproduction from the viewer, then keep the records alive (signed on Arkiv)', async () => {
+      await page.locator('.drawer').getByRole('button', { name: 'Close' }).click()
+      const source = page.locator('.source')
+      await source.getByText('No provenance from the publisher').waitFor()
+      await page.locator('.compare input[type=file]').setInputFiles({ name: 'index.html', mimeType: 'text/html', buffer: site(1) })
+      await source.getByRole('button', { name: 'Attest: I reproduced it' }).click()
+      await source.getByText('Attest on Arkiv: done').waitFor({ timeout: 120_000 })
+      await source.locator('.badge', { hasText: 'reproduced ×1' }).waitFor({ timeout: 60_000 })
+      await source.locator('.attests li', { hasText: 'via navik-dashboard' }).waitFor()
+      await source.getByRole('button', { name: /Keep alive/ }).click()
+      await source.getByText('Keep alive: done').waitFor({ timeout: 120_000 })
+      await shot(page, { path: `${SHOTS}-7-attested.png` })
+    })
+  }
   console.log(`\nall app e2e checks passed (screenshots: ${SHOTS}-*.png)`)
 } catch (err) {
   await shot(page, { path: `${SHOTS}-failure.png`, fullPage: true })
