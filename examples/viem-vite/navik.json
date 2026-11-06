@@ -1,0 +1,5 @@
+{
+  "project": "viem-example",
+  "build": "pnpm install --frozen-lockfile && pnpm build",
+  "output": "dist"
+}
