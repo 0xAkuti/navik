@@ -84,8 +84,10 @@ export const AttestationSchema = defineSchema('navik.attestation', {
   repo: str().optional(),
   commit: str().optional(),
   build: str().optional(),
-  /** what produced the attestation: navik-cli, navik-dashboard, … */
+  /** what produced the attestation: navik-cli, navik-ci, navik-dashboard, … */
   tool: str(),
+  /** a public log of the rebuild, e.g. the GitHub Actions run (https only) */
+  log: str().optional(),
 })
 
 /**
@@ -145,6 +147,7 @@ export type Attestation = Meta & {
   commit?: string
   build?: string
   tool: string
+  log?: string
 }
 
 export type ProvenanceInput = Omit<Provenance, keyof Meta>
@@ -232,7 +235,8 @@ function provenanceValues(p: ProvenanceInput) {
 }
 
 function attestationValues(a: AttestationInput) {
-  for (const field of ['name', 'repo', 'commit', 'build', 'tool'] as const) checkStr(field, a[field])
+  for (const field of ['name', 'repo', 'commit', 'build', 'tool', 'log'] as const) checkStr(field, a[field])
+  if (a.log && !a.log.startsWith('https://')) throw new Error(`log must be an https URL: ${a.log}`)
   return {
     chainId: u64(BigInt(a.chainId)),
     site: addr(getAddress(a.site)),
@@ -245,6 +249,7 @@ function attestationValues(a: AttestationInput) {
     ...(a.repo ? { repo: str(a.repo) } : {}),
     ...(a.commit ? { commit: str(a.commit) } : {}),
     ...(a.build ? { build: str(a.build) } : {}),
+    ...(a.log ? { log: str(a.log) } : {}),
   }
 }
 
@@ -403,5 +408,6 @@ function toAttestation(entity: unknown): Attestation {
     commit: val<string>(row, 'commit'),
     build: val<string>(row, 'build'),
     tool: val<string>(row, 'tool') ?? '',
+    log: val<string>(row, 'log'),
   }
 }
