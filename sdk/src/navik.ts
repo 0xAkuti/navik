@@ -1,13 +1,5 @@
+import { getCode, getContractEvents, getTransactionReceipt } from 'viem/actions'
 import {
-  getCode,
-  getContractEvents,
-  getTransactionReceipt,
-  readContract,
-  simulateContract,
-  waitForTransactionReceipt,
-} from 'viem/actions'
-import {
-  type Abi,
   type Address,
   concatBytes,
   decodeFunctionResult,
@@ -35,6 +27,7 @@ import {
   universalResolverAbi,
 } from './abi.ts'
 import { type InlinedAsset, storedLayout, unwrapCompressed } from './compress.ts'
+import { read, write } from './rpc.ts'
 import { type Ctx, requireWallet } from './types.ts'
 import { dnsEncode, isValidProjectLabel, parseContentContract, textResource } from './names.ts'
 
@@ -534,20 +527,4 @@ export async function hasPermission(ctx: Ctx, project: string, account: Address,
     ROLE_SET_TEXT,
     account,
   ])
-}
-
-// ---------------------------------------------------------------- helpers
-
-async function read<T>(ctx: Ctx, address: Address, abi: Abi, functionName: string, args: unknown[] = []): Promise<T> {
-  return (await readContract(ctx.publicClient, { address, abi, functionName, args })) as T
-}
-
-/** Simulates first (decoded revert reasons, gas estimate), then sends and waits. */
-async function write(ctx: Ctx, address: Address, abi: Abi, functionName: string, args: unknown[]): Promise<Hash> {
-  const { account, send } = requireWallet(ctx)
-  await simulateContract(ctx.publicClient, { address, abi, functionName, args, account })
-  const hash = await send({ to: address, data: encodeFunctionData({ abi, functionName, args }) })
-  const receipt = await waitForTransactionReceipt(ctx.publicClient, { hash })
-  if (receipt.status !== 'success') throw new Error(`transaction ${hash} reverted`)
-  return hash
 }
