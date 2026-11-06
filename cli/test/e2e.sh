@@ -143,7 +143,8 @@ EXAMPLE="$ROOT_DIR/examples/viem-vite"
 VITE="${PROJECT}-vite"
 as "$ALICE" claim "$VITE" >/dev/null
 (cd "$EXAMPLE" && as "$ALICE" deploy "$VITE" --smoke --promote --json) > "$WORK/deploy.json" 2> "$WORK/out"
-grep -E "^(packed|compressed|smoke|release)" "$WORK/out"
+grep -E "^(packed|compressed|segments|smoke|release)" "$WORK/out"
+grep -q "^segments     5 asset(s) in chunks of their own" "$WORK/out"
 json() { node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1]));console.log(r[process.argv[2]])' "$1" "$2"; }
 [[ "$(json "$WORK/deploy.json" published)" == true && "$(json "$WORK/deploy.json" promoted)" == true ]] \
   || { cat "$WORK/deploy.json"; echo "expected a published, promoted release" >&2; exit 1; }
