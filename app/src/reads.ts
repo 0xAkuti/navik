@@ -115,7 +115,7 @@ function logged(fetchFn: typeof fetch, route: Route, via: string, anonymous: boo
     try {
       const res = await fetchFn(url, init)
       const body = await res.arrayBuffer()
-      finish(e, { ms: performance.now() - t0, bytes: body.byteLength })
+      finish(e, { ms: performance.now() - t0, bytes: body.byteLength, error: res.ok ? undefined : `HTTP ${res.status} ${res.statusText}`.trim() })
       return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers })
     } catch (err) {
       finish(e, { ms: performance.now() - t0, error: err instanceof Error ? err.message : String(err) })
