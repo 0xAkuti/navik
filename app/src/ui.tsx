@@ -70,7 +70,7 @@ export function Info(props: { children: ComponentChildren }) {
   const show = (e: Event) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const left = Math.max(146, Math.min(innerWidth - 146, r.left + r.width / 2))
-    const below = r.top < 140
+    const below = r.top < innerHeight / 2
     setAt({ left, top: below ? r.bottom + 8 : r.top - 8, transform: `translate(-50%, ${below ? 0 : '-100%'})` })
   }
   const hide = () => setAt(undefined)
