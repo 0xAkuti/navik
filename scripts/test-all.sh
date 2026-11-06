@@ -3,7 +3,7 @@
 #   contracts (unit + fork tests) → typecheck + SDK tests → fork with Navik deployed → CLI flow →
 #   dashboard in headless Chromium → dashboard published to navik.eth → rebuilt from source and
 #   compared byte for byte → dashboard e2e against the exact bytes navik.eth serves, and through
-#   a replica of eth.limo → freeze navik.eth (in a snapshot, reverted
+#   a replica of eth.limo → bundled CLI over anon-rpc → freeze navik.eth (in a snapshot, reverted
 #   afterwards).
 # Leaves the fork running on :8545 for manual testing; stop it with `kill $(cat .anvil.pid)`.
 # Needs: Foundry, Node >= 22.18, pnpm, and `pnpm install` + `pnpm -C app exec playwright install chromium`.
@@ -64,6 +64,11 @@ trap 'kill $GATEWAY 2>/dev/null' EXIT
 (cd app && APP_URL=http://navik.eth.localhost:8588/ node test/e2e.ts)
 kill $GATEWAY
 trap - EXIT
+
+step "bundled CLI: anon-rpc harness embedded, outside the repo"
+(cd cli && node bundle.ts)
+(cd "$WORK" && node "$ROOT_DIR/cli/dist/navik.js" --anon-network passthrough \
+  --deployment "$ROOT_DIR/contracts/deployments/31337.json" verify navik.eth)
 
 step "freeze navik.eth (inside a snapshot): nobody can repoint it, everything keeps working"
 SNAPSHOT=$(cast rpc evm_snapshot --rpc-url "$RPC_URL" | tr -d '"')

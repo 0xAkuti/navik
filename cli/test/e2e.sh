@@ -128,6 +128,16 @@ fails as "$TEAM" deploy "$PROJECT" "$WORK/v2.html"
 fails as "$TEAM" promote "$PROJECT" v2
 fails as "$MALLORY" promote "$PROJECT" v2
 
+step "private reads: list, verify and promote through a sandboxed anon-rpc worker"
+ANON=(--anon-network passthrough) # no mixnet exit reaches a local fork; same harness, sandbox and code path
+navik "${ANON[@]}" ls "$PROJECT" 2>"$WORK/anon.log" | grep -q "1.$PROJECT"
+navik "${ANON[@]}" verify "1.$PROJECT" 2>>"$WORK/anon.log" | grep -q "✓"
+as "$ALICE" "${ANON[@]}" promote "$PROJECT" v2 2>>"$WORK/anon.log" >/dev/null
+live_is "$V2"
+as "$ALICE" promote "$PROJECT" v1 >/dev/null
+grep -q "NOT anonymous" "$WORK/anon.log" && grep -E "calls? through Passthrough" "$WORK/anon.log"
+fails navik --anon --rpc "$RPC_URL" ls "$PROJECT"
+
 step "eth.limo (a replica on the gateway's own libraries): production and releases, as served to a browser"
 GATEWAY_DIR="$CLI_DIR/test/gateway"
 [[ -d "$GATEWAY_DIR/node_modules" ]] || npm --prefix "$GATEWAY_DIR" install --silent --no-audit --no-fund
