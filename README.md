@@ -16,6 +16,7 @@ promoted     portfolio.navik.eth → 3.portfolio.navik.eth
 - **Production is `<project>.navik.eth`.** It is one `contentcontract` text record on the project's own ENSv2 Permissioned Resolver, so promote, rollback and demote are each one ENS write.
 - **Who may deploy is an ENSv2 permission.** The project owner grants a key "publish releases" and/or "change production", for that project only, and can revoke it at any time.
 - **Reading is private by default.** The dashboard and its built-in site viewer send every chain read through an [anon-rpc](https://ethereum.github.io/anon-rpc/) network (Nym by default). The RPC provider sees a mixnet exit, not who is looking at which project or site.
+- **Every name has a public link.** `navik.eth.limo`, `portfolio.navik.eth.limo` and `3.portfolio.navik.eth.limo` open in any browser with no IPFS and no host of ours: eth.limo reads the site from Ethereum. See [eth.limo links](#ethlimo-links).
 - **Anyone can check that a site matches its source.** `navik verify <name> --against <build>` and `scripts/reproduce.sh` rebuild a site from its repo and compare it byte for byte with what the name serves.
 - **Real apps, one command, CI included.** With a `navik.json`, `navik deploy` builds a Vite app (React, viem, …), packs its `dist/` into one document and smoke-tests it in a sandboxed browser before spending gas. A GitHub Action previews every merge with a publish-only key and promotes after approval. See [Deploy a Vite app](#deploy-a-vite-app-and-from-ci).
 - **Provenance on Arkiv, source on Swarm.** `navik deploy --build <cmd>` records on [Arkiv](https://arkiv.network) which commit and command built a release, and puts the source on Swarm. Anyone who rebuilds it can attest the result, and the viewer shows "reproduced ×N" for any ERC-8244 site. See [Provenance](#provenance-on-arkiv-source-on-swarm).
@@ -47,10 +48,11 @@ That makes three transactions (registries have no multicall), all from one walle
 
 | Contract | Role |
 |---|---|
-| `NavikRegistrar` | Creates the Navik registry and the factory, and hands out `<project>.navik.eth`. Each project gets its own Permissioned Resolver (creator is the only role holder) and its own release registry (`preview` registered, the factory as sole registrar). The registrar keeps no role. It claims the root project (`app`) at deploy, so nobody can front-run it |
+| `NavikRegistrar` | Creates the Navik registry and the factory, and hands out `<project>.navik.eth`. Each project gets its own Permissioned Resolver (creator is the only role holder, `contenthash` set to a NavikPages hook) and its own release registry (`preview` registered, the factory as sole registrar). The registrar keeps no role. It claims the root project (`app`) at deploy, so nobody can front-run it |
 | `NavikFactory` | `storeChunks(chunks)` stores content chunks. It is permissionless and addressed by content, so identical chunks are stored once across all projects. `publish(project, pointers)` deploys release N at `CREATE3(keccak(project, N))`, computing the content hash onchain, registers `<N>.<project>.navik.eth` and repoints `preview`. `publishContent` stores and publishes in one transaction for small sites |
-| `Deployment` | One release. ERC-8244 `html()` concatenates its chunks. `chunkCount()` and `chunk(i)` serve RPCs that limit `eth_call` size. `manifest()` returns project, version, content hash, size and chunk pointers. It is also the ENS resolver of its own name(s): `contentcontract` and `addr` return its address. A clone with immutable args: no storage, no owner |
+| `Deployment` | One release. ERC-8244 `html()` concatenates its chunks. `chunkCount()` and `chunk(i)` serve RPCs that limit `eth_call` size. `manifest()` returns project, version, content hash, size and chunk pointers. It is also the ENS resolver of its own name(s): `contentcontract` and `addr` return its address, and `contenthash` is a hook on its own `page()`, which returns the document as a data URL. A clone with immutable args: no storage, no owner |
 | `NavikResolver` | Resolver of navik.eth. Forwards queries for `navik.eth` itself to the root project's resolver, so navik.eth follows its promotions and rollbacks. Unregistered names under navik.eth do not resolve |
+| `NavikPages` | Stateless helper for gateways. `page(name)` resolves any ERC-8244 name onchain through ENS, reads `html()` and returns a data URL. No owner, no upgrades, nothing Navik-specific |
 
 ## Dashboard
 
@@ -146,6 +148,31 @@ All numbers were measured from headless Chromium. The Tor demo gateway could not
 
 The CLI is not covered: anon-rpc has no published Node harness yet. Point `--rpc` at your own node if you need private CLI reads.
 
+## eth.limo links
+
+Every Navik name works on [eth.limo](https://eth.limo), so a site can be opened in any browser, with no ERC-8244 support, IPFS or Navik server involved:
+
+| Link | Serves |
+|---|---|
+| `navik.eth.limo` | The dashboard (the root project's production) |
+| `portfolio.navik.eth.limo` | Production, following every promotion and rollback |
+| `3.portfolio.navik.eth.limo` | That release, forever |
+| `preview.portfolio.navik.eth.limo` | The newest release |
+| `alice.eth.limo`, `3.alice.eth.limo` | The same, for a [linked domain](#how-it-works) |
+
+There is nothing to set up. eth.limo follows [ERC-8121](https://eips.ethereum.org/EIPS/eip-8121) hooks: a `contenthash` record can name a function to call, which must return a `data:` URL. Each project gets a hook on `NavikPages.page("<project>.navik.eth")` when it is claimed, so the record never changes: every read follows `contentcontract`. Each release answers with a hook on its own `page()`. Owners can replace their project's `contenthash` like any other record. `navik deploy` prints the link on mainnet, and the dashboard shows it next to production and each release.
+
+The trade-offs, stated plainly:
+
+- **eth.limo is a trusted gateway.** It sees your IP and what you open, and its RPC's answers are not verified: nothing checks the content hash, unlike `navik verify`, the dashboard's viewer or an ERC-8244 browser. Links are for reach. Reading through Navik keeps the [private reads](#private-reads-anon-rpc).
+- **The dashboard itself stays private.** Once loaded from eth.limo, it reads through anon-rpc and signs in your wallet as usual. eth.limo only learns that you opened it.
+- **Size.** eth.limo refuses a data URL over 1,000,000 bytes (a 749,970-byte stored document), and the hook's `eth_call` costs 15M gas at 200 KB, 51M at 500 KB and 92M at the maximum. A default geth RPC caps calls at 50M, so `navik deploy` warns above 450 KB of stored bytes. eth.limo's own cap is not public. Compression counts: the dashboard is 145 KB.
+- **The hook format is experimental.** eth.limo calls its protocodes placeholders until ERC-8121 and its ENSIP are accepted. If they change, `contenthash` records can change with them, but release contracts cannot: their hooks are fixed at deploy.
+- **Headers.** The gateway sends `Content-Type: text/html` with no charset, so a document needs its own `<meta charset="utf-8">` (compressed releases always have one). Other paths are not expected to serve the document, so use hash routes.
+- **Promotions may lag.** A production hook is constant, so a cache in front of the gateway could serve the previous release until it expires. Release links are immutable and `preview` changes its hook with every release, so neither has this problem.
+
+`cli/test/gateway` replays what the gateway does, with the same libraries and versions as [dweb-proxy-api](https://github.com/ethlimo/dweb-proxy-api), and `scripts/test-all.sh` runs the whole dashboard e2e through it. eth.limo itself can only be tested once Navik is on mainnet.
+
 ## Verify a site against its source
 
 Every release stores its content hash, and `navik verify` checks the bytes against it. To also prove those bytes were built from a given source tree, rebuild the site and compare:
@@ -226,7 +253,7 @@ More detail in [`arkiv/`](arkiv/): [schema](arkiv/schema.md), [how we use Arkiv]
 
 ## CROPS
 
-- **C:** We control the `navik.eth` name, and nothing else is ours: no server, gateway, indexer or relayer. Sites, names and the dashboard all live on Ethereum, and any RPC can serve them. If we disappear, renewing `navik.eth` is permissionless. Once it is frozen, we cannot repoint it either. If an anon-rpc network or RPC provider refuses you, pick another network or endpoint in the privacy panel. Provenance and attestations live on Arkiv, a public network where anyone can write, read and extend them; nothing about serving or verifying a site depends on them.
+- **C:** We control the `navik.eth` name, and nothing else is ours: no server, indexer or relayer, and no gateway of our own (eth.limo links are a convenience on top; any ENS gateway or ERC-8244 browser works). Sites, names and the dashboard all live on Ethereum, and any RPC can serve them. If we disappear, renewing `navik.eth` is permissionless. Once it is frozen, we cannot repoint it either. If an anon-rpc network or RPC provider refuses you, pick another network or endpoint in the privacy panel. Provenance and attestations live on Arkiv, a public network where anyone can write, read and extend them; nothing about serving or verifying a site depends on them.
 - **O:** MIT. The repo alone builds and runs everything: contracts, CLI, dashboard and a local mainnet fork. The dashboard build is reproducible, and `scripts/reproduce.sh` proves that `navik.eth` serves this code.
 - **P:** By default the RPC provider sees reads arriving from a Nym exit, not your IP, and Arkiv's RPC sees provenance lookups arriving from Nox. The wallet only sees signing requests. The CDN serving the pinned anon-rpc worker sees that you use it, but not what you read. Navik runs no backend and no analytics. Details are [below](#what-each-party-learns).
 - **S:** Keys never leave your wallet. The anon-rpc worker is hash-pinned code in a null-origin sandbox, and opened sites run sandboxed with no access to the dashboard or wallet. Releases are checked against their onchain content hash. The trust assumptions are your RPC's answers and ENSv2's core contracts; see the security phases below.
@@ -238,6 +265,7 @@ More detail in [`arkiv/`](arkiv/): [schema](arkiv/schema.md), [how we use Arkiv]
 | RPC provider (default `ethereum-rpc.publicnode.com`, reached through the mixnet) | The reads themselves: names, project accounts, release addresses. Reads under one `isolationKey` may be linkable to each other | Your IP. Which reads belong to the same person across isolation keys (if the network honours them) |
 | anon-rpc network (Nym mix nodes and exit) | Mix nodes: nothing. Exit: that some client is talking to the RPC host | Who you are; with Nox, the request contents (TLS ends inside the worker) |
 | Worker CDN (jsDelivr, unpkg or GitHub, one fetch per network, cached) | Your IP, and that you load an anon-rpc worker | Anything you read |
+| eth.limo, only if you open a `.limo` link | Your IP and the site you opened | What you do in the dashboard once it is loaded |
 | Arkiv RPC (Rabdi, reached through Nox) | Which sites' provenance and attestations are looked up | Your IP |
 | Your wallet and its RPC | Your account, chain and the transactions you sign (public once sent), including attestations you sign on Arkiv | What you browse or manage in the dashboard |
 | Navik (the team) | Nothing: there is no server | — |
@@ -300,7 +328,7 @@ node src/cli.ts open 2.portfolio.navik.eth
 node src/cli.ts provenance portfolio                         # source and reproductions, from Arkiv
 (cd ../examples/viem-vite && node ../../cli/src/cli.ts deploy --smoke)   # build, pack and ship from navik.json
 
-# full CLI flow (claim → deploy → grants → rollback → multi-chunk → revoke → isolation → custom domains → demote →
+# full CLI flow (claim → deploy → grants → rollback → multi-chunk → revoke → isolation → eth.limo replica → custom domains → demote →
 # the Vite example from navik.json, smoke-tested → unchanged re-deploy → code splitting rejected);
 # with ARKIV_PRIVATE_KEY set (tGLM on Rabdi) also provenance → Swarm (local stand-in) → reproduce → attest
 pnpm run e2e
