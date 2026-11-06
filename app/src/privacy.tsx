@@ -14,192 +14,187 @@ import {
   UNSUPPORTED,
   useReads,
 } from './reads.ts'
-import { Badge, Info, kb } from './ui.tsx'
+import { Icon, Info, kb } from './ui.tsx'
 
-/** Header pill: where reads go right now, and how many reads went through anon-rpc. */
+/** Where the main chain's reads go right now, in a word or two. */
+function status(r: ReturnType<typeof useReads>) {
+  const n = r.settings && networkById(r.settings.network)
+  if (!n) return { tone: 'warn', label: 'Direct reads' }
+  if (!n.anonymous) return { tone: 'warn', label: 'Not anonymous' }
+  if (r.phase === 'failed') return { tone: 'error', label: `${n.name} unreachable` }
+  if (r.phase === 'ready') return { tone: 'ok', label: `Private via ${n.name}` }
+  return { tone: 'muted', label: 'Connecting…' }
+}
+
+/** Header pill: the state of reads at a glance; opens the panel. */
 export function PrivacyPill(props: { open: boolean; onToggle: () => void }) {
   const r = useReads()
   if (!r.settings) return null
-  const n = networkById(r.settings.network)
-  // wallet requests (account, chain, signing) are not reads, so they are not counted here
-  const reads = r.calls.anon + r.calls.direct
-  const tone = !n || !n.anonymous ? 'warn' : r.phase === 'failed' ? 'error' : r.phase === 'ready' ? 'ok' : 'muted'
-  const label = !n
-    ? 'Direct reads'
-    : !n.anonymous
-      ? `${n.name}: not anonymous`
-      : r.phase === 'failed'
-        ? `${n.name} unreachable`
-        : r.phase === 'ready'
-          ? `Private via ${n.name}`
-          : `Connecting to ${n.name}…`
+  const { tone, label } = status(r)
   return (
     <button class={`pill ${tone}`} onClick={props.onToggle} aria-expanded={props.open} title="Reads and privacy">
       <i class={`dot ${tone}`} />
-      <span class="pill-label">{label}</span>
-      {reads > 0 && (
-        <span class="pill-count" title={`${r.calls.anon} of ${reads} reads via anon-rpc`}>
-          {r.calls.anon}/{reads}
-        </span>
-      )}
+      {label}
     </button>
   )
 }
 
-/** Bottom drawer: choose the network and RPC, and watch every request the app makes. */
-export function PrivacyDrawer(props: { onClose: () => void }) {
+/** Floating panel: choose each route, and watch every request the app makes. */
+export function PrivacyPanel(props: { onClose: () => void }) {
   const r = useReads()
   const chainId = r.chainId
   const [showLog, setShowLog] = useState(false)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && props.onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [props.onClose])
   if (chainId === undefined || !r.settings) return null
 
-  const reads = r.calls.anon + r.calls.direct
-  const pct = reads ? Math.round((100 * r.calls.anon) / reads) : 100
+  const { tone, label } = status(r)
+  const arkiv = r.routes[ARKIV_CHAIN_ID] ?? settingsFor(ARKIV_CHAIN_ID)
 
   return (
     <section class="drawer" aria-label="Network privacy">
       <header>
         <h2>
-          Reads{' '}
-          <Info>
-            Reads go through anon-rpc: the RPC sees a mixnet exit, not your IP. Your wallet only signs. If the network is down, reads stop;
-            nothing falls back to a direct connection.
-          </Info>
+          <i class={`dot ${tone}`} />
+          {label}{' '}
+          <Info>The RPC sees a mixnet exit, not your IP. Your wallet only signs. If the network is down, reads stop.</Info>
         </h2>
-        <button class="btn ghost sm" onClick={props.onClose}>
-          Close
+        <button class="icon-btn" onClick={props.onClose} aria-label="Close">
+          <Icon name="x" />
         </button>
       </header>
-      <div class="drawer-body">
-        <div class="drawer-settings">
-          <div class="meter">
-            <strong>{pct}%</strong> of {reads} reads through anon-rpc
-            <div class="meter-bar">
-              <span style={{ width: `${pct}%` }} />
-            </div>
-            <p class="small muted" title={`${kb(r.bytes.anon)} via anon-rpc, ${kb(r.bytes.direct)} direct`}>
-              {r.calls.anon} via anon-rpc · {r.calls.direct} direct · {r.calls.wallet} wallet
-            </p>
-          </div>
 
-          <RouteSettings chainId={chainId} title="Ethereum reads" settings={r.settings} />
-          <RouteSettings
-            chainId={ARKIV_CHAIN_ID}
-            title="Arkiv reads"
-            settings={r.routes[ARKIV_CHAIN_ID] ?? settingsFor(ARKIV_CHAIN_ID)}
-          />
+      <dl class="stats">
+        <div title={kb(r.bytes.anon)}>
+          <dt>anon-rpc</dt>
+          <dd>{r.calls.anon}</dd>
         </div>
+        <div title={kb(r.bytes.direct)} class={r.calls.direct ? 'warn' : ''}>
+          <dt>direct</dt>
+          <dd>{r.calls.direct}</dd>
+        </div>
+        <div title="Account, chain and signing: not reads">
+          <dt>wallet</dt>
+          <dd>{r.calls.wallet}</dd>
+        </div>
+      </dl>
 
-        <div class="drawer-traffic">
-          <div class="row">
-            <h2>Requests</h2>
-            <span class="spacer" />
-            <button class="btn ghost sm" onClick={() => setShowLog(!showLog)}>
-              {showLog ? 'Show requests' : `Network log (${r.logs.length})`}
-            </button>
-          </div>
-          {showLog ? (
-            <pre class="netlog">{r.logs.join('\n') || 'No log lines yet.'}</pre>
-          ) : r.entries.length === 0 ? (
-            <p class="muted small">No requests yet.</p>
-          ) : (
-            <table class="traffic">
-              <tbody>
-                {r.entries.map((e) => (
-                  <TrafficRow key={e.id} e={e} />
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+      <div class="routes">
+        <Route chainId={chainId} title="Ethereum reads" settings={r.settings} />
+        <Route chainId={ARKIV_CHAIN_ID} title="Arkiv reads" settings={arkiv} />
+      </div>
+
+      <details class="rpcs">
+        <summary>
+          <Icon name="chevron" size={14} /> RPC endpoints
+        </summary>
+        <RpcField chainId={chainId} title="Ethereum" settings={r.settings} />
+        <RpcField chainId={ARKIV_CHAIN_ID} title="Arkiv" settings={arkiv} />
+      </details>
+
+      <div class="traffic-head">
+        <h3>{showLog ? 'Network log' : 'Requests'}</h3>
+        <button class="btn ghost sm" onClick={() => setShowLog(!showLog)}>
+          {showLog ? 'Requests' : 'Log'}
+        </button>
+      </div>
+      <div class="traffic-body">
+        {showLog ? (
+          <pre class="netlog">{r.logs.join('\n') || 'Empty.'}</pre>
+        ) : r.entries.length === 0 ? (
+          <p class="muted small">None yet.</p>
+        ) : (
+          <table class="traffic">
+            <tbody>
+              {r.entries.map((e) => (
+                <TrafficRow key={e.id} e={e} />
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </section>
   )
 }
 
-/** Network and RPC for one chain's reads: the managed chain, or Arkiv. */
-function RouteSettings(props: { chainId: number; title: string; settings: ReadSettings }) {
+/** The network one chain's reads go through. Applies on change. */
+function Route(props: { chainId: number; title: string; settings: ReadSettings }) {
   const r = useReads()
-  const [network, setNetwork] = useState<NetworkId>(props.settings.network)
-  const [rpc, setRpc] = useState(props.settings.rpc)
-  useEffect(() => {
-    setNetwork(props.settings.network)
-    setRpc(props.settings.rpc)
-  }, [props.settings.network, props.settings.rpc])
-
-  const validRpc = /^https?:\/\/[^\s]+$/.test(rpc)
-  const dirty = network !== props.settings.network || rpc !== props.settings.rpc
-  const id = props.settings.network === 'direct' ? undefined : props.settings.network
-  const failed = id && r.phases[id]?.phase === 'failed' ? (r.phases[id]?.error ?? 'unreachable') : undefined
+  const { chainId, title, settings } = props
+  const n = networkById(settings.network)
+  const phase = n && r.phases[n.id]
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (validRpc) saveSettings(props.chainId, { network, rpc })
-      }}
-    >
-      <fieldset>
-        <legend>{props.title}</legend>
-        {NETWORKS.map((net) => {
-          const unsupported = UNSUPPORTED[props.chainId]?.[net.id]
-          return (
-            <label key={net.id} class={`radio ${unsupported ? 'disabled' : ''}`}>
-              <input
-                type="radio"
-                name={`network-${props.chainId}`}
-                checked={network === net.id}
-                disabled={!!unsupported}
-                onChange={() => setNetwork(net.id)}
-              />
-              <span>{net.name}</span>
-              <Info>{unsupported ?? net.tagline}</Info>
-            </label>
-          )
-        })}
-        <label class="radio">
-          <input type="radio" name={`network-${props.chainId}`} checked={network === 'direct'} onChange={() => setNetwork('direct')} />
-          <span>Direct</span>
-          <Info>Straight to the RPC, which sees your IP with every read.</Info>
-        </label>
-      </fieldset>
-      <input id={`read-rpc-${props.chainId}`} aria-label="RPC endpoint" list={`read-rpcs-${props.chainId}`} value={rpc} onInput={(e) => setRpc((e.currentTarget as HTMLInputElement).value.trim())} />
-      <datalist id={`read-rpcs-${props.chainId}`}>
-        {(PUBLIC_RPCS[props.chainId] ?? []).map((u) => (
+    <>
+      <label class="route">
+        <span>{title}</span>
+        <Info>{n?.tagline ?? 'Straight to the RPC, which sees your IP with every read.'}</Info>
+        <select
+          value={settings.network}
+          onChange={(e) => saveSettings(chainId, { ...settings, network: (e.currentTarget as HTMLSelectElement).value as NetworkId })}
+        >
+          {NETWORKS.map((net) => (
+            <option key={net.id} value={net.id} disabled={!!UNSUPPORTED[chainId]?.[net.id]} title={UNSUPPORTED[chainId]?.[net.id]}>
+              {net.name}
+              {net.anonymous ? '' : ' (exposes IP)'}
+            </option>
+          ))}
+          <option value="direct">Direct (exposes IP)</option>
+        </select>
+      </label>
+      {phase?.phase === 'failed' && (
+        <p class="route-failed small">
+          <span class="error">
+            Unreachable {phase.error && <Info>{phase.error}</Info>}
+          </span>
+          <button class="btn sm" onClick={reconnect}>
+            Reconnect
+          </button>
+        </p>
+      )}
+    </>
+  )
+}
+
+/** The RPC behind a route. Applies when the field is left or on Enter. */
+function RpcField(props: { chainId: number; title: string; settings: ReadSettings }) {
+  const { chainId, title, settings } = props
+  const [rpc, setRpc] = useState(settings.rpc)
+  useEffect(() => setRpc(settings.rpc), [settings.rpc])
+  const valid = /^https?:\/\/[^\s]+$/.test(rpc)
+  return (
+    <label class="rpc">
+      <span class="small muted">{title}</span>
+      <input
+        value={rpc}
+        list={`read-rpcs-${chainId}`}
+        aria-invalid={!valid}
+        onInput={(e) => setRpc((e.currentTarget as HTMLInputElement).value.trim())}
+        onChange={() => valid && rpc !== settings.rpc && saveSettings(chainId, { ...settings, rpc })}
+        onKeyDown={(e) => e.key === 'Enter' && (e.currentTarget as HTMLInputElement).blur()}
+      />
+      <datalist id={`read-rpcs-${chainId}`}>
+        {(PUBLIC_RPCS[chainId] ?? []).map((u) => (
           <option key={u} value={u} />
         ))}
       </datalist>
-      <div class="row">
-        <button class="btn primary sm" disabled={!dirty || !validRpc}>
-          Apply
-        </button>
-        {failed && (
-          <button class="btn sm" type="button" onClick={reconnect}>
-            Reconnect
-          </button>
-        )}
-      </div>
-      {failed && <p class="error small">{failed}</p>}
-    </form>
+    </label>
   )
 }
 
 function TrafficRow({ e }: { e: Entry }) {
-  const tone = e.route === 'wallet' ? 'muted' : e.anonymous ? 'ok' : 'warn'
-  const label = e.route === 'wallet' ? 'wallet' : e.route === 'direct' ? 'direct' : e.anonymous ? 'anon-rpc' : 'anon-rpc*'
-  const methods = summarize(e.methods)
+  const tone = e.route === 'wallet' ? '' : e.anonymous ? 'ok' : 'warn'
+  const route = e.route === 'wallet' ? 'wallet' : e.route === 'direct' ? 'direct' : 'anon-rpc'
   return (
-    <tr class={e.error ? 'failed' : ''}>
+    <tr class={e.error ? 'failed' : ''} title={[route, e.via, e.bytes === undefined ? '' : kb(e.bytes), e.error].filter(Boolean).join(' · ')}>
       <td>
-        <Badge tone={tone}>{label}</Badge>
+        <i class={`dot ${tone}`} />
       </td>
-      <td class="mono small" title={e.methods.join(', ')}>
-        {methods}
-      </td>
-      <td class="small muted">{e.via}</td>
-      <td class="small muted num">
-        {e.error ? <span class="error" title={e.error}>failed</span> : e.ms === undefined ? '…' : `${Math.round(e.ms)} ms`}
-      </td>
-      <td class="small muted num">{e.bytes !== undefined ? kb(e.bytes) : ''}</td>
+      <td class="mono">{summarize(e.methods)}</td>
+      <td class="muted">{e.via.split(' → ')[0]}</td>
+      <td class="muted num">{e.error ? <span class="error">failed</span> : e.ms === undefined ? '…' : `${Math.round(e.ms)} ms`}</td>
     </tr>
   )
 }

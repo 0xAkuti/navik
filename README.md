@@ -131,7 +131,7 @@ A dapp's RPC provider normally sees your IP next to every address and name you l
 - **It fails closed.** If the network is unreachable, reads stop with an error and a Reconnect button. Nothing silently falls back to a direct connection.
 - **Unrelated reads are kept apart.** The dashboard (keyed by account) and each opened site use separate `isolationKey`s, asking the network not to link them. Support depends on the network.
 - **Arkiv reads have a route of their own.** Release provenance and attestations come from Arkiv's RPC, also through anon-rpc: Nox by default, because Nym's worker (0.1.0) drops the `Content-Type` header, which Arkiv's node requires (it answers 415). Each network runs one worker, shared by every chain routed through it. The privacy panel configures both routes, and its counters include both.
-- **You can see where everything went.** The header shows the active network and how many calls went through anon-rpc. Clicking it opens a panel with a percentage meter, every request (route, method, latency, size) and the worker's log. There you can switch the network or RPC endpoint.
+- **You can see where everything went.** The header shows the active network. Clicking it opens a panel with call counts by route, every request (route, method, latency, size) and the worker's log. There you can switch the network or RPC endpoint.
 
 | Network | Anonymizes | Connect | Per read (batch) | Worker size |
 |---|---|---|---|---|

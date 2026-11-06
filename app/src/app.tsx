@@ -2,7 +2,7 @@ import * as navik from '@navik/sdk'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { Address } from 'viem'
 
-import { PrivacyDrawer, PrivacyPill } from './privacy.tsx'
+import { PrivacyPanel, PrivacyPill } from './privacy.tsx'
 import { ProjectView } from './project.tsx'
 import { loggedWallet, useReads } from './reads.ts'
 import { store } from './store.ts'
@@ -39,7 +39,7 @@ export function App() {
   const [route, setRoute] = useState(parseRoute())
   const [busy, setBusy] = useState<string>()
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string }>()
-  const [drawer, setDrawer] = useState(false)
+  const [panel, setPanel] = useState(false)
   const [picker, setPicker] = useState(false)
   const reads = useReads()
 
@@ -140,7 +140,7 @@ export function App() {
           <a class={`nav-link ${route.page === 'open' ? 'active' : ''}`} href="#/open/">
             Open a site
           </a>
-          <PrivacyPill open={drawer} onToggle={() => setDrawer(!drawer)} />
+          <PrivacyPill open={panel} onToggle={() => setPanel(!panel)} />
           {connected ? (
             <AccountChip ctx={ctx ?? readCtx} account={account!} />
           ) : (
@@ -151,7 +151,7 @@ export function App() {
         </div>
       </header>
 
-      <main class={drawer ? 'with-drawer' : ''}>
+      <main>
         {viewing !== undefined ? (
           readCtx ? (
             <Viewer ctx={readCtx} name={viewing} wallet={wallet && account ? { provider: wallet.provider, account } : undefined} />
@@ -172,8 +172,8 @@ export function App() {
       </main>
 
       {picker && <WalletPicker wallets={wallets} connect={connect} onClose={() => setPicker(false)} />}
-      {drawer && <PrivacyDrawer onClose={() => setDrawer(false)} />}
-      <div class={`toasts ${drawer ? 'above-drawer' : ''}`} aria-live="polite">
+      {panel && <PrivacyPanel onClose={() => setPanel(false)} />}
+      <div class="toasts" aria-live="polite">
         {busy && (
           <div class="toast">
             <Spinner /> {busy}… confirm in your wallet
@@ -366,13 +366,13 @@ function RootStatus(props: { ctx: navik.Ctx }) {
   }, [props.ctx])
   if (!status) return null
   return status.frozen ? (
-    <span title={`Nobody can repoint ${props.ctx.deployment.root}, including its owner`}>
+    <span class="root-status" title={`Nobody can repoint ${props.ctx.deployment.root}, including its owner`}>
       <Badge tone="ok">
         <Icon name="lock" size={12} /> frozen
       </Badge>
     </span>
   ) : (
-    <span title={`The ${props.ctx.deployment.root} owner can still repoint the namespace`}>
+    <span class="root-status" title={`The ${props.ctx.deployment.root} owner can still repoint the namespace`}>
       <Badge tone="warn">testing</Badge>
     </span>
   )

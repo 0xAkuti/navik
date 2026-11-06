@@ -301,10 +301,8 @@ try {
     assert.ok(methods.includes('eth_sendTransaction'))
     assert.deepEqual([...new Set(methods)].filter((m) => !WALLET_METHODS.has(m)), [])
     await page.locator('button.pill').click()
-    await page.locator('button.pill', { hasText: /(^|\D)(\d+)\/\2$/ }).waitFor()
-    await page.getByText(/100% of \d+ reads through anon-rpc/).waitFor()
-    const summary = await page.locator('.meter p').first().innerText()
-    assert.match(summary, /^[1-9]\d* via anon-rpc · 0 direct · [1-9]\d* wallet$/, summary)
+    const stats = (await page.locator('.stats').innerText()).replace(/\s+/g, ' ').trim()
+    assert.match(stats, /^anon-rpc [1-9]\d* direct 0 wallet [1-9]\d*$/, stats)
     await shot(page, { path: `${SHOTS}-4-privacy.png` })
     await page.locator('.drawer').getByRole('button', { name: 'Close' }).click()
   })
@@ -345,13 +343,11 @@ try {
 
   await step('switch reads to Direct: the panel shows them as direct', async () => {
     await page.locator('button.pill').click()
-    const ethereum = page.locator('.drawer form').first()
-    await ethereum.getByLabel(/^Direct/).check()
-    await ethereum.getByRole('button', { name: 'Apply' }).click()
+    await page.locator('.drawer').getByLabel('Ethereum reads').selectOption('direct')
     await page.locator('button.pill', { hasText: 'Direct reads' }).waitFor()
     await page.goto(`${APP}#/open/1.${project}.navik.eth`)
     await siteFrame(page).getByText('hello from v1').waitFor()
-    await page.locator('.meter p', { hasText: /· [1-9]\d* direct/ }).waitFor() // the drawer is still open
+    await page.locator('.stats div', { hasText: /direct\s*[1-9]/ }).waitFor() // the panel is still open
   })
 
   if (ARKIV_KEY) {
