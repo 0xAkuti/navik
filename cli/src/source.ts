@@ -1,14 +1,17 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { realpathSync } from 'node:fs'
+import { realpathSync, statSync } from 'node:fs'
 import { dirname, relative } from 'node:path'
 
-/** The committed source a release was built from: repo URL, commit, and the built file's path in it. */
+/**
+ * The committed source a release was built from: repo URL, commit, and the built file's path in it
+ * (a build directory, packed into one document, ends in `/`).
+ */
 export type GitSource = { root: string; repo: string; commit: string; output: string }
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim()
 
 /**
- * Finds the git checkout `file` was built in. The tree must be clean: provenance names a commit,
+ * Finds the git checkout `file` (or build directory) was built in. The tree must be clean: provenance names a commit,
  * so uncommitted changes would make it a lie.
  */
 export function gitSource(file: string, repoOverride?: string): GitSource {
@@ -17,7 +20,8 @@ export function gitSource(file: string, repoOverride?: string): GitSource {
   const dirty = git(root, 'status', '--porcelain', '--untracked-files=no')
   if (dirty) throw new Error(`${root} has uncommitted changes; commit them so the provenance names the source you built:\n${dirty}`)
   const repo = repoOverride ?? publicUrl(git(root, 'remote', 'get-url', 'origin'))
-  return { root, repo, commit: git(root, 'rev-parse', 'HEAD'), output: relative(root, path) }
+  const output = relative(root, path) + (statSync(path).isDirectory() ? '/' : '')
+  return { root, repo, commit: git(root, 'rev-parse', 'HEAD'), output }
 }
 
 /** git@github.com:org/repo.git → https://github.com/org/repo; credentials are dropped. */
@@ -51,7 +55,8 @@ export function gitCheckout(repo: string, commit: string, dir: string) {
   execFileSync('git', ['-C', dir, '-c', 'advice.detachedHead=false', 'checkout', '--quiet', commit], { stdio: 'inherit' })
 }
 
+/** Runs a build command; its output is log, so it goes to stderr and stdout stays machine-readable. */
 export function runBuild(dir: string, command: string) {
-  const r = spawnSync('bash', ['-c', command], { cwd: dir, stdio: 'inherit' })
+  const r = spawnSync('bash', ['-c', command], { cwd: dir, stdio: ['inherit', 2, 'inherit'] })
   if (r.status !== 0) throw new Error(`build failed (exit ${r.status}): ${command}`)
 }

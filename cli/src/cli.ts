@@ -1,13 +1,17 @@
 #!/usr/bin/env node
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Command, Option } from 'commander'
 import * as navik from '@navik/sdk'
-import { type Address, getAddress, type Hex, isAddress } from 'viem'
+import { type Address, concat as concatBytes, formatGwei, getAddress, type Hex, isAddress, parseGwei } from 'viem'
+import { getGasPrice } from 'viem/actions'
 
+import { type DeployResult, reportToGitHub } from './ci.ts'
 import { type GlobalOptions, loadArkiv, loadArkivWriter, loadCtx, swarmApi, swarmBatch } from './config.ts'
+import { buildSite, describePack, findConfig, readSite, recordedBuild, shouldCompress } from './site.ts'
+import { describeSmoke, smoke } from './smoke.ts'
 import { extractTar, gitArchive, gitCheckout, type GitSource, gitSource, runBuild, tarCommit } from './source.ts'
 
 const program = new Command()
@@ -63,25 +67,72 @@ program
   })
 
 program
+  .command('build')
+  .description("run navik.json's build and pack its output into the one document a release stores (no chain needed)")
+  .argument('[dir]', 'where to look for navik.json (default: here and up)')
+  .option('--skip-build', 'pack the existing output without running "build"')
+  .option('--smoke', 'load the result in headless Chromium, sandboxed like the viewer, and fail if it breaks')
+  .option('--out <file>', 'write the document to a file (e.g. to compare in the viewer)')
+  .action(async (dir: string | undefined, opts: { skipBuild?: boolean; smoke?: boolean; out?: string }) => {
+    const config = findConfig(dir)
+    if (!config) throw new Error(`no navik.json in ${resolve(dir ?? '.')} or its parents`)
+    if (!opts.skipBuild) buildSite(config)
+    const site = readSite(resolve(config.dir, config.output))
+    if (site.pack) for (const line of describePack(site.pack)) console.log(line)
+    const compress = await shouldCompress(site, config.compress)
+    const stored = compress ? await navik.wrapCompressed(site.bytes) : site.bytes
+    const chunks = Math.ceil(stored.length / CHUNK_SIZE)
+    console.log(`size         ${site.bytes.length} bytes${compress ? `, ${stored.length} compressed` : ''} → ${chunks} chunk(s)`)
+    if (opts.out) {
+      writeFileSync(opts.out, site.bytes)
+      console.log(`wrote        ${opts.out}`)
+    }
+    if (opts.smoke) await smokeOrFail(stored)
+  })
+
+program
   .command('deploy')
-  .description('publish a prebuilt HTML file as a new permanent release')
-  .argument('<project>')
-  .argument('<file>', 'single-file HTML document')
+  .description('publish a site as a new permanent release; with no <path>, build and ship what navik.json describes')
+  .argument('[project]', 'default: "project" in navik.json')
+  .argument('[path]', 'an HTML file, or a build directory to pack into one document (default: navik.json)')
   .option('--promote', 'also make it production')
   .option('--compress', 'store gzip-wrapped with a small loader (cheaper; the site then needs JavaScript)')
+  .option('--no-compress', 'store the document as is (default for a single file)')
+  .option('--skip-build', 'with navik.json: ship the existing output without running "build"')
+  .option('--smoke', 'load the site in headless Chromium first and abort if it breaks')
+  .option('--force', 'publish even if the bytes equal the latest release')
+  .option('--max-gas-price <gwei>', 'abort if gas is more expensive than this')
   .option('--dry-run', 'print the plan only')
-  .option('--build <command>', 'record provenance on Arkiv: the command (run at the repo root) that built <file>')
-  .option('--repo <url>', 'with --build: public URL of the source repo (default: the origin remote)')
-  .option('--swarm', 'with --build: also put the source (git archive of the commit) on Swarm')
-  .option('--notes <text>', 'with --build: release notes')
-  .action(async (project: string, file: string, opts: DeployOptions) => {
+  .option('--json', 'print the result as JSON on stdout (the log goes to stderr)')
+  .option('--provenance', 'with navik.json: record on Arkiv which commit and build command produced the release')
+  .option('--build <command>', 'with <path>: record provenance on Arkiv: the command (run at the repo root) that built <path>')
+  .option('--repo <url>', 'with provenance: public URL of the source repo (default: the origin remote)')
+  .option('--swarm', 'with provenance: also put the source (git archive of the commit) on Swarm')
+  .option('--notes <text>', 'with provenance: release notes')
+  .action(async (projectArg: string | undefined, path: string | undefined, opts: DeployOptions) => {
+    if (opts.json) console.log = console.error
+    const config = path ? undefined : findConfig()
+    if (!path && !config) throw new Error('nothing to deploy: pass <project> <path>, or run where a navik.json is')
+    if (config && opts.build) throw new Error('--build is for deploying a <path>; with navik.json, use --provenance')
+    if (path && opts.provenance) throw new Error('--provenance reads navik.json; for a <path>, use --build <command>')
+    const project = projectArg ?? config!.project
     const c = await ctx()
+
+    if (config && !opts.skipBuild) buildSite(config)
+    const target = config ? resolve(config.dir, config.output) : path!
     // fail before spending gas: a dirty tree or an oversized field cannot become provenance
-    const source = opts.build ? gitSource(file, opts.repo) : undefined
-    const plan = await navik.planPublish(c, project, new Uint8Array(readFileSync(file)), { compress: opts.compress })
+    const source = config && opts.provenance ? gitSource(target, opts.repo) : opts.build ? gitSource(target, opts.repo) : undefined
+    const build = source && (config ? recordedBuild(config, source.root) : opts.build!)
+    const site = readSite(target)
+    if (site.pack) for (const line of describePack(site.pack)) console.log(line)
+    const compress = await shouldCompress(site, opts.compress ?? config?.compress)
+    const plan = await navik.planPublish(c, project, site.bytes, { compress })
+    const latest = opts.force ? undefined : await navik.latestRelease(c, project)
+    const unchanged = latest?.contentHash === plan.contentHash
     const reused = plan.chunks.filter((ch) => ch.stored).length
     const txs = plan.singleTx ? 1 : plan.uploads.length + 1
-    console.log(`release      ${plan.name}`)
+    if (unchanged) console.log(`release      ${latest.name} (unchanged: same bytes as the latest release, nothing to publish)`)
+    else console.log(`release      ${plan.name}`)
     if (plan.compressed) {
       const { originalSize, originalChunks } = plan.compressed
       console.log(`compressed   ${originalSize} → ${plan.size} bytes (${originalChunks} → ${plan.chunks.length} chunks)`)
@@ -89,29 +140,66 @@ program
     console.log(`size         ${plan.size} / ${plan.maxSize} bytes`)
     console.log(`chunks       ${plan.chunks.length} (${reused} already stored, ${plan.chunks.length - reused} new)`)
     console.log(`content hash ${plan.contentHash}`)
-    console.log(`address      ${plan.predicted} (known before upload)`)
-    console.log(`transactions ${txs}${plan.singleTx ? ' (store + publish together)' : ''}`)
-    if (opts.dryRun) return
+    if (!unchanged) {
+      console.log(`address      ${plan.predicted} (known before upload)`)
+      console.log(`transactions ${txs}${plan.singleTx ? ' (store + publish together)' : ''}`)
+    }
+    if (opts.smoke) await smokeOrFail(concatBytes(plan.chunks.map((ch) => ch.data)))
 
-    await navik.publish(c, plan, (step) => {
-      const what = step.kind === 'upload' ? `uploaded ${step.chunks} chunk(s)` : 'published'
-      console.log(`${what.padEnd(12)} tx ${step.hash} (gas ${step.gasUsed})`)
-    })
-    if (opts.promote) {
-      const tx = await navik.promote(c, project, plan.predicted)
-      console.log(`promoted     ${navik.projectName(c, project)} → ${plan.name} (tx ${tx})`)
+    const result: DeployResult = {
+      project: navik.projectName(c, project),
+      release: unchanged ? latest.name : plan.name,
+      version: String(unchanged ? latest.version : plan.version),
+      address: unchanged ? latest.deployment : plan.predicted,
+      contentHash: plan.contentHash,
+      size: plan.size,
+      chunks: plan.chunks.length,
+      published: false,
+      unchanged,
+      promoted: false,
+      preview: navik.previewName(c, project),
+      transactions: [],
     }
-    if (source && opts.build) {
-      await recordSource(c, { name: plan.name, project: navik.projectName(c, project), site: plan.predicted }, plan, source, opts.build, opts)
+    if (!opts.dryRun) {
+      if (opts.maxGasPrice && !unchanged) {
+        const price = await getGasPrice(c.publicClient)
+        const max = parseGwei(opts.maxGasPrice)
+        if (price > max) throw new Error(`gas costs ${formatGwei(price)} gwei, above --max-gas-price ${opts.maxGasPrice}; nothing was sent`)
+      }
+      if (!unchanged) {
+        await navik.publish(c, plan, (step) => {
+          const what = step.kind === 'upload' ? `uploaded ${step.chunks} chunk(s)` : 'published'
+          console.log(`${what.padEnd(12)} tx ${step.hash} (gas ${step.gasUsed})`)
+          result.transactions.push(step.hash)
+        })
+        result.published = true
+      }
+      if (opts.promote) {
+        const live = await navik.resolveContentContract(c, result.project)
+        if (live && getAddress(live) === getAddress(result.address)) {
+          console.log(`production   ${result.project} already serves ${result.release}`)
+        } else {
+          const tx = await navik.promote(c, project, result.address as Address)
+          console.log(`promoted     ${result.project} → ${result.release} (tx ${tx})`)
+          result.transactions.push(tx)
+          result.promoted = true
+        }
+        result.production = result.project
+      }
+      if (source && build && !unchanged) {
+        result.provenance = await recordSource(c, { name: plan.name, project: result.project, site: plan.predicted }, plan, source, build, opts)
+      }
     }
+    reportToGitHub(result)
+    if (opts.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
   })
 
 program
   .command('record')
   .description('record on Arkiv which source and build command produced an existing release')
   .argument('<name>', 'the release, e.g. 3.portfolio or navik.eth')
-  .argument('<file>', 'the built file, inside a clean git checkout of the source')
-  .requiredOption('--build <command>', 'the command (run at the repo root) that built <file>')
+  .argument('<path>', 'the built file or build directory, inside a clean git checkout of the source')
+  .requiredOption('--build <command>', 'the command (run at the repo root) that built <path>')
   .option('--repo <url>', 'public URL of the source repo (default: the origin remote)')
   .option('--swarm', 'also put the source (git archive of the commit) on Swarm')
   .option('--notes <text>', 'release notes')
@@ -120,7 +208,7 @@ program
     const source = gitSource(file, opts.repo)
     const v = await navik.verify(c, name)
     if (!v.hashMatches) throw new Error(`${v.name} failed verification; run \`navik verify\``)
-    if (!navik.compareBuild(v, readFileSync(file)).matches) throw new Error(`${file} is not what ${v.name} serves`)
+    if (!navik.compareBuild(v, readSite(file).bytes).matches) throw new Error(`${file} is not what ${v.name} serves`)
     const release = v.releaseName ?? v.name
     const project = v.project ? navik.projectName(c, v.project) : v.name
     const version = v.version ?? 0n
@@ -193,7 +281,7 @@ program
         gitCheckout(trusted.repo, trusted.commit, dir)
       }
       runBuild(dir, trusted.build)
-      const built = readFileSync(join(dir, trusted.output))
+      const built = readSite(join(dir, trusted.output)).bytes
       const cmp = navik.compareBuild(v, built)
       console.log(cmp.matches ? `✓ byte-identical to ${v.name}` : `✗ the rebuild (keccak256 ${cmp.hash}) differs from ${v.name}`)
       if (!cmp.matches) process.exitCode = 1
@@ -325,7 +413,7 @@ program
   .argument('<name>', 'portfolio, 2.portfolio, preview.portfolio, portfolio.navik.eth or any ENS name')
   .option('--out <file>', 'write the verified HTML to a file (the original document if gzip-wrapped)')
   .option('--raw', 'with --out: write the exact stored bytes, even if gzip-wrapped')
-  .option('--against <file>', 'check a local build (e.g. from the source repo) is byte-identical to the release')
+  .option('--against <path>', 'check a local build (an HTML file or build directory) is byte-identical to the release')
   .option('--attest', 'with --against: publish the result as an attestation on Arkiv')
   .action(async (name: string, opts: { out?: string; raw?: boolean; against?: string; attest?: boolean }) => {
     const c = await ctx()
@@ -338,7 +426,7 @@ program
     console.log(`  ${tick(v.hashMatches)} html() matches content hash ${v.contentHash}`)
     if (v.original) console.log(`  ✓ gzip-wrapped: original ${v.original.html.length} bytes, keccak256 ${v.original.hash}`)
     if (opts.against) {
-      const local = navik.compareBuild(v, readFileSync(opts.against))
+      const local = navik.compareBuild(v, readSite(opts.against).bytes)
       console.log(
         local.matches
           ? `  ✓ ${opts.against} is byte-identical to the ${local.matched === 'original' ? 'original document' : 'release'}`
@@ -386,7 +474,13 @@ program
 type DeployOptions = {
   promote?: boolean
   compress?: boolean
+  skipBuild?: boolean
+  smoke?: boolean
+  force?: boolean
+  maxGasPrice?: string
   dryRun?: boolean
+  json?: boolean
+  provenance?: boolean
   build?: string
   repo?: string
   swarm?: boolean
@@ -424,6 +518,13 @@ async function recordSource(
     notes: opts.notes,
   })
   console.log(`provenance   ${source.repo} @ ${source.commit.slice(0, 12)} → Arkiv entity ${entityKey} (tx ${txHash})`)
+  return entityKey
+}
+
+async function smokeOrFail(html: Uint8Array) {
+  const report = await smoke(html)
+  for (const line of describeSmoke(report)) console.log(line)
+  if (!report.ok) throw new Error('the smoke test failed; nothing was published')
 }
 
 /** A site's records on Arkiv, and which provenance is trusted (written by the release's publisher). */
@@ -445,6 +546,9 @@ function addr(value: string): Address {
   if (!isAddress(value)) throw new Error(`not an address: ${value}`)
   return getAddress(value)
 }
+
+/** NavikChunks.CHUNK_SIZE, for estimates made without a chain */
+const CHUNK_SIZE = 24_575
 
 function tick(ok: boolean) {
   return ok ? '✓' : '✗'
