@@ -9,7 +9,7 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { arkivChain } from '@navik/sdk'
 import { chromium, type Page } from 'playwright'
-import { createWalletClient, encodeFunctionData, type Hex, http, parseAbi } from 'viem'
+import { createWalletClient, encodeFunctionData, type Hex, http, parseAbi, publicActions } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 
 const RPC = process.env.RPC_URL ?? 'http://127.0.0.1:8545'
@@ -154,8 +154,12 @@ await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
 await page.addInitScript(injectWallet, { rpc: RPC, account: ALICE, arkiv: `0x${arkivChain().id.toString(16)}` })
 const ARKIV_KEY = process.env.ARKIV_PRIVATE_KEY as Hex | undefined
 if (ARKIV_KEY) {
-  const arkivWallet = createWalletClient({ account: privateKeyToAccount(ARKIV_KEY), chain: arkivChain(), transport: http() })
-  await page.exposeFunction('arkivSend', (tx: { to: Hex; data: Hex }) => arkivWallet.sendTransaction({ to: tx.to, data: tx.data }))
+  const arkivWallet = createWalletClient({ account: privateKeyToAccount(ARKIV_KEY), chain: arkivChain(), transport: http() }).extend(publicActions)
+  // an extension can cost more when mined than when estimated: the Arkiv SDK adds 25% too
+  await page.exposeFunction('arkivSend', async (tx: { to: Hex; data: Hex }) => {
+    const gas = await arkivWallet.estimateGas({ to: tx.to, data: tx.data })
+    return arkivWallet.sendTransaction({ to: tx.to, data: tx.data, gas: (gas * 125n) / 100n })
+  })
 }
 await page.addInitScript(arkivPassthrough, ARKIV_RPC)
 
