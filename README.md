@@ -243,6 +243,8 @@ NAVIK_PROVENANCE=1 ./scripts/deploy-app.sh    # the dashboard records its own pr
 
 `reproduce` runs the publisher's build command on your machine, so it shows the command and waits for `--yes`. Use a container if you don't trust the publisher.
 
+The source can live on Radicle instead of a git host: `--repo rad://<rid>` (or a `rad://` origin) records the repo itself, not one server, and `navik reproduce --git` clones it over https from a public seed, so it needs no Radicle install.
+
 Writing wallets on Rabdi:
 - `0xF6063cdF296412d55dd9930F183eBd0b53e964C2`: the publisher of `navik.eth`'s dashboard (mainnet provenance)
 - `0x09D1F0ebF181503417b74203A1a924A8145830F5`: test and demo records (chain id 31337, the local fork), and a reproduction of `navik.eth`

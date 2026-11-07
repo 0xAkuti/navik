@@ -284,7 +284,7 @@ git -C "$AUTO_SRC" -c user.name=e2e -c user.email=e2e@navik.invalid commit -qm s
 git -C "$AUTO_SRC" remote add origin "file://$AUTO_SRC"
 auto() { (cd "$AUTO_SRC" && ARKIV_PRIVATE_KEY=$ALICE as "$ALICE" deploy "$@"); }
 auto | tee "$WORK/out"
-grep -q '^provenance   skipped: file://.* is not a public https repo$' "$WORK/out"
+grep -q '^provenance   skipped: file://.* is not a public repo$' "$WORK/out"
 grep -q '^published' "$WORK/out"
 printf '<h1>two</h1>' >> "$AUTO_SRC/page.html"
 auto | tee "$WORK/out"

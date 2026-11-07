@@ -23,7 +23,7 @@ Written by `navik deploy` (by default from `navik.json`, with `--build <cmd>` fo
 | `name` | str | yes | The release's permanent name, e.g. `3.portfolio.navik.eth` |
 | `project` | str | yes | The production name, e.g. `portfolio.navik.eth`; lists a project's records in one query |
 | `version` | u64 | no | Release number |
-| `repo` | str | no | Public git URL of the source |
+| `repo` | str | no | Public URL of the source: https, or `rad://<rid>` for Radicle |
 | `commit` | str | yes | Full commit hash the release was built from |
 | `build` | str | no | Command, run at the repo root, that builds the site |
 | `output` | str | no | Path of the built file in the repo |

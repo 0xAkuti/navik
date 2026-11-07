@@ -135,7 +135,7 @@ program
   .option('--provenance', 'with navik.json: require recording the commit and build command on Arkiv (default: record it when possible)')
   .option('--no-provenance', 'do not record provenance')
   .option('--build <command>', 'with <path>: record provenance on Arkiv: the command (run at the repo root) that built <path>')
-  .option('--repo <url>', 'with provenance: public URL of the source repo (default: the origin remote)')
+  .option('--repo <url>', 'with provenance: public https or rad:// URL of the source repo (default: the origin remote)')
   .option('--swarm', 'with provenance: also put the source (git archive of the commit) on Swarm')
   .option('--notes <text>', 'with provenance: release notes')
   .action(async (projectArg: string | undefined, path: string | undefined, opts: DeployOptions) => {
@@ -243,7 +243,7 @@ program
   .argument('<name>', 'the release, e.g. 3.portfolio or navik.eth')
   .argument('<path>', 'the built file or build directory, inside a clean git checkout of the source')
   .requiredOption('--build <command>', 'the command (run at the repo root) that built <path>')
-  .option('--repo <url>', 'public URL of the source repo (default: the origin remote)')
+  .option('--repo <url>', 'public https or rad:// URL of the source repo (default: the origin remote)')
   .option('--swarm', 'also put the source (git archive of the commit) on Swarm')
   .option('--notes <text>', 'release notes')
   .action(async (name: string, file: string, opts: DeployOptions & { build: string }) => {
@@ -625,7 +625,7 @@ async function autoSource(c: navik.Ctx, config: LoadedConfig, target: string, re
   if (getAddress(account) !== getAddress(c.account)) return void skipProvenance('ARKIV_PRIVATE_KEY is not the deploy key, so clients would ignore the record')
   try {
     const source = gitSource(target, repo)
-    if (!isPublicRepo(source.repo)) return void skipProvenance(`${source.repo} is not a public https repo`)
+    if (!isPublicRepo(source.repo)) return void skipProvenance(`${source.repo} is not a public repo`)
     if (!(await getBalance(loadArkiv(), { address: account }))) return void skipProvenance(`${account} has no tGLM on Arkiv`)
     return source
   } catch (err) {

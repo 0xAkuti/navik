@@ -188,6 +188,11 @@ export async function attestationsOf(arkiv: ArkivRead, chainId: number, contentH
   return page.entities.map(toAttestation)
 }
 
+/** The repo id in a Radicle URL (`rad://z…`, `rad:z…`, or either with a peer after it): it names the repo on any seed. */
+export function radicleId(repo: string): string | undefined {
+  return /^rad:(?:\/\/)?(z[1-9A-HJ-NP-Za-km-z]+)(?:\/|$)/.exec(repo)?.[1]
+}
+
 /**
  * Provenance anyone could have written is only trusted when its creator is the account that
  * published the release (`publisher`, read from the Navik factory's DeploymentPublished event).

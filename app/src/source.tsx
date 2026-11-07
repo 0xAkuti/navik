@@ -279,7 +279,9 @@ function Check(props: { ok?: boolean; children: ComponentChildren }) {
   )
 }
 
-/** GitHub/GitLab/Codeberg URLs link to the tree at the commit; anything else to the repo. */
+/** Radicle, GitHub, GitLab and Codeberg repos link to the tree at the commit; anything else to the repo. */
 function repoLink(repo: string, commit: string): string {
+  const rid = navik.radicleId(repo)
+  if (rid) return `https://app.radicle.at/nodes/seed.radicle.at/rad:${rid}/tree/${commit}`
   return /^https:\/\/(github\.com|gitlab\.com|codeberg\.org)\//.test(repo) ? `${repo}/tree/${commit}` : repo
 }

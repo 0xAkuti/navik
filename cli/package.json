@@ -14,6 +14,7 @@
     "bundle": "node bundle.ts",
     "prepack": "node bundle.ts",
     "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts",
     "e2e": "bash test/e2e.sh"
   },
   "license": "MIT",
