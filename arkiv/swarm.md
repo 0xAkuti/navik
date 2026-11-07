@@ -16,16 +16,19 @@ The reference is unencrypted on purpose: the source is public, and an encrypted 
 
 ## An example
 
-<!-- TODO(team): fill in after the first upload with the real batch -->
-- Arkiv entity: `0x…` (open: `https://rabdi.explorer.arkiv.network/entity/0x…`)
-- Swarm reference: `…` (open: `https://api.gateway.ethswarm.org/bzz/<reference>/`, or `bzz://<reference>` in Freedom)
+The dashboard `navik.eth` serves, built from commit `b0ff5a1`:
+
+- Arkiv entity: `0x2ac1462c4b71c425de920c09e69626fc9aabacc90c564c9955500e251a9cdfd5` ([open](https://rabdi.explorer.arkiv.network/entity/0x2ac1462c4b71c425de920c09e69626fc9aabacc90c564c9955500e251a9cdfd5))
+- Swarm reference: `b036a86a16a80ec28eed8331bca25bc9dbe2bfb23e1a66d81f0f3f0b65ab367b` ([open](https://api.gateway.ethswarm.org/bzz/b036a86a16a80ec28eed8331bca25bc9dbe2bfb23e1a66d81f0f3f0b65ab367b/), or `bzz://b036a86a16a80ec28eed8331bca25bc9dbe2bfb23e1a66d81f0f3f0b65ab367b` in Freedom)
+- keccak256 of the tar: `0xb6bbcd48376fc4ef107420b00d26796032635229a60d7736561edcbed4cf0565`
+
+`navik reproduce navik.eth --yes` fetches that reference from the public gateway, checks the hash and commit, rebuilds, and reports `✓ byte-identical to navik.eth`.
 
 ## Postage stamps and node
 
-<!-- TODO(team): batch id, the wallet that bought it (or who gave it), and the node -->
-- Postage batch: `…`
-- Bought by / provided by: `…`
-- Node: bee-compatible HTTP API (`POST /bzz`, `GET /bzz/<ref>/`), e.g. a bee node or Freedom's `antd` light node at `http://127.0.0.1:1633`
+- Postage batch: `ddf52dccfcbf7c3ebf837a05288a856d68bcc6ceb9a56464cdf0d96d174ee878` (depth 18, about 6.66 MB effective, 30 days from 2026-11-06)
+- Bought by: `0xc5cf82fa2ed844b7cf3f022778842e61515f68e5`, the node's wallet on Gnosis Chain, for about 0.145 xDAI
+- Node: `antd` 0.5.77, the light node bundled with Freedom, run standalone at `http://127.0.0.1:1633`. Any bee-compatible HTTP API works (`POST /bzz`, `GET /bzz/<ref>/`)
 - Reads default to the public gateway `https://api.gateway.ethswarm.org` (`SWARM_API` overrides it)
 
 ## Files that upload to and read from Swarm
@@ -64,4 +67,6 @@ Without a batch, `bash cli/test/e2e.sh` (with `ARKIV_PRIVATE_KEY` set) runs the 
 ## What got in our way
 
 - **Postage stamps before the first byte.** Uploading needs a funded postage batch (xBZZ on Gnosis) even for a few hundred KB, so the first integration ran against a stand-in for the bee API. A small free testnet batch, or a faucet-backed upload endpoint for hackathons, would remove that step.
+- **The minimum depth is a trap.** Depth 17 is listed as 537 MB but holds 44.7 KB effectively, so a batch has to be sized from the effective volume table. Our 0.8 MB source needed depth 18.
+- **Paying in xDAI helped.** `antd` quotes and buys a batch of any size from plain xDAI (`GET /v0/storage/quote`, `POST /v0/storage/buy`), so we never had to acquire xBZZ. It also set up its own chequebook on the first upload. These routes are not in the Bee API docs; we found them in Freedom's source.
 - **Single file vs. collection.** A tar uploaded as one file is easy to hash and verify, but cannot be browsed on a gateway. Uploading it as a collection (`swarm-collection: true`) would make the source browsable, but the reference then addresses a manifest, and checking the files against the provenance would need Swarm's chunk hashing on the client.

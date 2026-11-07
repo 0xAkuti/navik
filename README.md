@@ -192,7 +192,7 @@ The trade-offs, stated plainly:
 - **Headers.** The gateway sends `Content-Type: text/html` with no charset, so a document needs its own `<meta charset="utf-8">` (compressed releases always have one). Other paths are not expected to serve the document, so use hash routes.
 - **Promotions may lag.** A production hook is constant, so a cache in front of the gateway could serve the previous release until it expires. Release links are immutable and `preview` changes its hook with every release, so neither has this problem.
 
-`cli/test/gateway` replays what the gateway does, with the same libraries and versions as [dweb-proxy-api](https://github.com/ethlimo/dweb-proxy-api), and `scripts/test-all.sh` runs the whole dashboard e2e through it. eth.limo itself can only be tested once Navik is on mainnet.
+`cli/test/gateway` replays what the gateway does, with the same libraries and versions as [dweb-proxy-api](https://github.com/ethlimo/dweb-proxy-api), and `scripts/test-all.sh` runs the whole dashboard e2e through it. [navik.eth.limo](https://navik.eth.limo) serves the dashboard from mainnet.
 
 ## Verify a site against its source
 
@@ -244,8 +244,8 @@ NAVIK_PROVENANCE=1 ./scripts/deploy-app.sh    # the dashboard records its own pr
 `reproduce` runs the publisher's build command on your machine, so it shows the command and waits for `--yes`. Use a container if you don't trust the publisher.
 
 Writing wallets on Rabdi:
-- `0x09D1F0ebF181503417b74203A1a924A8145830F5`: test and demo records (chain id 31337, the local fork)
-<!-- TODO(team): add the mainnet publisher once navik.eth's dashboard records its provenance -->
+- `0xF6063cdF296412d55dd9930F183eBd0b53e964C2`: the publisher of `navik.eth`'s dashboard (mainnet provenance)
+- `0x09D1F0ebF181503417b74203A1a924A8145830F5`: test and demo records (chain id 31337, the local fork), and a reproduction of `navik.eth`
 
 Query the records yourself (no key, no SDK):
 

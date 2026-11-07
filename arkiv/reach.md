@@ -17,9 +17,9 @@ Writing provenance is one extra flag on a command developers already run, and re
 
 ## Can they try it today
 
-- **CLI:** yes, against Arkiv's testnet (Rabdi) and a local mainnet fork (`scripts/dev-fork.sh`, then the commands in the [README](../README.md#provenance-on-arkiv-source-on-swarm)). Writing needs tGLM from the Arkiv faucet; reading needs nothing.
+- **CLI:** yes, against Arkiv's testnet (Rabdi) and mainnet, or a local mainnet fork (`scripts/dev-fork.sh`, then the commands in the [README](../README.md#provenance-on-arkiv-source-on-swarm)). Writing needs tGLM from the Arkiv faucet; reading needs nothing.
 - **Dashboard:** yes, `pnpm -C app dev` or the built single file; the viewer's Source card reads Arkiv for any site.
-- **Mainnet:** Navik's contracts are not deployed on mainnet yet (navik.eth is registered). Once they are, the dashboard served by `navik.eth` will carry its own provenance (`NAVIK_PROVENANCE=1 ./scripts/deploy-app.sh`), so `navik reproduce navik.eth --yes` checks the app itself.
+- **Mainnet:** yes. Navik is live, `navik.eth` and [navik.eth.limo](https://navik.eth.limo) serve the dashboard, and it carries its own provenance, so `navik reproduce navik.eth --yes` rebuilds it from the source on Swarm and compares it byte for byte.
 
 ## Will we keep building it
 
