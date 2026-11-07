@@ -278,7 +278,12 @@ program
       console.log(r.publisher ? `  no provenance from the publisher ${r.publisher}` : '  no publisher known (not a Navik release): provenance below is unverified')
     }
     for (const p of r.provenance.filter((p) => p !== r.trusted)) {
-      console.log(`  ✗ ignored  provenance by ${p.creator} (not the publisher): ${p.repo} @ ${p.commit.slice(0, 12)}`)
+      const older = r.publisher && getAddress(p.creator) === getAddress(r.publisher)
+      console.log(
+        older
+          ? `  · older    provenance by the publisher: ${p.repo} @ ${p.commit.slice(0, 12)}`
+          : `  ✗ ignored  provenance by ${p.creator} (not the publisher): ${p.repo} @ ${p.commit.slice(0, 12)}`,
+      )
     }
     const ok = r.attestations.filter((a) => a.result === 'match')
     console.log(`  reproduced by ${ok.length} builder(s)${ok.length < r.attestations.length ? `, ${r.attestations.length - ok.length} could not` : ''}`)
